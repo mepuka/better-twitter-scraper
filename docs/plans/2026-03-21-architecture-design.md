@@ -1,329 +1,485 @@
-# Better Twitter Scraper — Architecture Design
+# Better Twitter Scraper — Architecture Design (v2)
 
-An Effect-first reimplementation of [twitter-scraper](https://github.com/the-convocation/twitter-scraper), built on Effect 4 beta. This document describes the service architecture, domain model, error handling, and strategy pattern that form the foundation of the library.
+An Effect-first reimplementation of [twitter-scraper](https://github.com/the-convocation/twitter-scraper), built on Effect 4 beta.
 
 ## Goals
 
-- **Effect-native**: Services, layers, schemas, typed errors, streams — no imperative escape hatches.
-- **Strategy-driven**: Decouple *how* we scrape (retry, rate limiting, auth refresh) from *what* we scrape (tweets, profiles, search). Swap strategies without touching domain logic.
-- **Resilient by design**: Model Twitter API instability explicitly. Rate limits, auth failures, and schema changes are first-class concerns, not afterthoughts.
-- **Testable**: Every service boundary is an interface. Provide test layers to run the full domain logic against mock HTTP responses with no network, no delays.
+- **Effect-native**: Services, layers, schemas, typed errors, streams.
+- **Strategy-driven**: Decouple *how* we scrape (retry, rate limiting, auth refresh) from *what* we scrape. Strategies are a required dependency the caller provides — no defaults baked in.
+- **Resilient by design**: Model Twitter API instability explicitly — including the many endpoint families, auth modes, bearer token choices, and non-obvious failure modes.
+- **Testable from the start**: Every service boundary is an interface. `Effect.withSpan` tracing on all service methods. Test layers with mock HTTP responses.
 
 ## Reference Material
 
 - **Original source**: `~/.local/share/effect-solutions/twitter-scraper/src/`
 - **Effect source**: `~/.local/share/effect-solutions/effect/`
-- **Effect guides**: `effect-solutions show <topic>` (quick-start, services-and-layers, data-modeling, error-handling, config, testing, cli)
+- **Effect guides**: `effect-solutions show <topic>`
 
 ---
 
-## 1. ScraperStrategy — The Core Abstraction
+## 1. Endpoint Families
 
-The `ScraperStrategy` is a service (`Context.Tag`) that wraps every outgoing API call. It controls four concerns:
+Twitter/X is not one API. The original scraper talks to five distinct endpoint families, each with different base URLs, auth modes, and response formats. Within the GraphQL family, some endpoints use the secondary bearer token — this is modeled via `BearerTokenChoice` on the request, not as a separate family.
 
-| Concern | Responsibility |
-|---------|---------------|
-| **Retry** | Exponential backoff with jitter. Conditional on error type: retry 429 and 5xx, fail immediately on 404. |
-| **Rate limiting** | Per-endpoint token buckets tracking `x-rate-limit-*` response headers. |
-| **Auth refresh** | Lazy guest token refresh when expired. Re-authenticate on 401/403. |
-| **Request transformation** | Cipher randomization, header injection, Chrome fingerprinting. |
+| Family | Base URL | Auth | Response Format |
+|--------|----------|------|-----------------|
+| **GraphQL** | `api.x.com/graphql/{opId}/{opName}` | Guest or User | Nested JSON with `data.user.result.timeline...` |
+| **REST** | `x.com/i/api/1.1/dm/...` | User required | Flat JSON |
+| **LoginFlow** | `api.x.com/1.1/onboarding/task.json` | Guest (no CSRF) | Flow subtask responses |
+| **Activation** | `api.x.com/1.1/guest/activate.json` | None (bootstrap) | `{guest_token: string}` |
+| **PageVisit** | `x.com` (HTML) | None | HTML (cookie establishment, guest token extraction) |
 
-### Strategy Implementations
+Bearer token selection is orthogonal to endpoint family. GraphQL endpoints like `SearchTimeline`, `UserTweets`, and `Followers` use `bearerToken2`; others use `bearerToken`. This is encoded per-request via `BearerTokenChoice`, not per-family.
 
-Each strategy is a `Layer` — a value you compose at the application edge.
+### ApiRequest — Typed Request Descriptor
 
-| Strategy | Behavior |
-|----------|----------|
-| `Default` | Exponential backoff + token bucket + lazy auth refresh. Good for single-account usage. |
-| `Aggressive` | Fast retry, higher concurrency, support for multiple accounts/token rotation. |
-| `Conservative` | Longer backoff, lower rate limits, single account. For long-running background jobs. |
-| `Test` | No delays, no network. For unit and integration tests. |
+Rather than `execute(httpEffect)`, the strategy receives a typed request that carries all the metadata it needs:
 
-Domain services call `ScraperStrategy.execute(httpEffect)` and never know which strategy is active. Swapping strategies requires changing one line at the composition root.
+```ts
+class ApiRequest<T> extends Schema.Class<ApiRequest<T>>("ApiRequest")({
+  endpoint: EndpointId,          // e.g. "UserTweets", "SearchTimeline", "DmInbox"
+  family: EndpointFamily,        // GraphQL | REST | LoginFlow | Activation | PageVisit
+  authRequirement: AuthRequirement, // Guest | User | None
+  bearerTokenChoice: BearerTokenChoice, // Primary | Secondary
+  rateLimitBucket: RateLimitBucket,  // per-endpoint bucket ID
+  method: HttpMethod,            // GET | POST
+  url: string,                   // fully constructed URL
+  headers: Headers,              // additional endpoint-specific headers
+  body: Option<unknown>,         // POST body if applicable
+}) {}
+```
+
+The strategy can inspect any field to make routing, retry, and rate-limiting decisions. Domain services construct `ApiRequest` values; the strategy decides how to execute them.
+
+### EndpointFamily type
+
+```ts
+type EndpointFamily = "GraphQL" | "REST" | "LoginFlow" | "Activation" | "PageVisit"
+```
+
+### BearerTokenChoice
+
+```ts
+type BearerTokenChoice = "Primary" | "Secondary"
+```
+
+The original scraper uses two hardcoded bearer tokens (`bearerToken` and `bearerToken2` in `api.ts:33-37`). `bearerToken2` is used for search, UserTweets, and login endpoints. This choice must be explicit per-request, not a global setting.
 
 ---
 
-## 2. Domain Model
+## 2. Auth Capabilities
+
+Guest mode and logged-in mode are not interchangeable. Search (`search.ts:89`) and DMs (`direct-messages.ts:131`) require `isLoggedIn()`. The type system must enforce this at compile time.
+
+### Two distinct capability types
+
+```ts
+// Base: available to all auth modes
+interface GuestAuth {
+  readonly installHeaders: (request: ApiRequest<any>) => Effect<ApiRequest<any>, AuthenticationError>
+  readonly refreshToken: Effect<void, AuthenticationError>
+  readonly ensureToken: Effect<void, AuthenticationError>
+}
+
+// Extended: requires login
+interface UserAuth extends GuestAuth {
+  readonly login: (credentials: LoginCredentials) => Effect<void, AuthenticationError>
+  readonly logout: Effect<void, AuthenticationError>
+  readonly isLoggedIn: Effect<boolean>
+}
+```
+
+### Services declare their auth requirement in R
+
+```ts
+// Works with guest token — R includes GuestAuth
+getTweet(id: TweetId): Effect<Tweet, TweetError, GuestAuth | TwitterHttpClient | ...>
+
+// Requires login — R includes UserAuth (NOT GuestAuth)
+searchTweets(query, mode): Stream<Tweet, SearchError, UserAuth | TwitterHttpClient | ...>
+getInbox(): Effect<DmInbox, DmError, UserAuth | TwitterHttpClient | ...>
+```
+
+If you provide `GuestAuth.Live` but try to use `SearchService`, the compiler rejects it — `UserAuth` is unsatisfied. No runtime `isLoggedIn()` check needed in domain code.
+
+### Login flow complexity
+
+The original's login is a multi-step process:
+
+1. **Preflight**: visit `x.com` to establish Cloudflare cookies and extract guest token from inline `<script>`
+2. **Fallback activation**: call `/guest/activate.json` only if preflight didn't set the token
+3. **CSRF avoidance**: do NOT send `x-csrf-token` during login (triggers bot detection error 399)
+4. **Subtask loop**: iterate through subtasks (enter username, enter password, 2FA, CAPTCHA)
+5. **Custom handlers**: users can register handlers for specific subtask IDs
+
+The `UserAuth.Live` layer must model all of this. The subtask handler registry is a `Ref<HashMap<string, SubtaskHandler>>` where:
+
+```ts
+type SubtaskHandler = (
+  subtaskId: string,
+  previousResponse: FlowResponse,
+  credentials: LoginCredentials,
+  api: FlowApi,
+) => Effect<FlowTokenResult, AuthenticationError>
+```
+
+---
+
+## 3. ScraperStrategy — Revised
+
+The strategy is a required, unsatisfied dependency. There is no default baked into the layer tree.
+
+### Interface
+
+```ts
+interface ScraperStrategy {
+  readonly execute: <T>(request: ApiRequest<T>) => Effect<T, ApiError | RateLimitError | AuthenticationError>
+}
+```
+
+The strategy receives the full `ApiRequest` — it knows the endpoint, family, auth requirement, bearer token choice, and rate limit bucket. It decides:
+
+- Which retry schedule to use (may vary by endpoint family)
+- Whether to consult the rate limiter (and which bucket)
+- Whether to refresh auth before or after failure
+- How to handle non-standard failures (e.g., `x-rate-limit-incoming == '0'` → delete token)
+
+### Implementations as Layers
+
+```ts
+// Caller MUST provide one — no default
+ScraperStrategy.Standard   // exponential backoff + token bucket + lazy refresh
+ScraperStrategy.Aggressive // fast retry, higher concurrency
+ScraperStrategy.Conservative // longer backoff, lower limits
+ScraperStrategy.Test       // no delays, no network
+```
+
+### Layer composition — strategy is NOT included
+
+Services depend on each other (e.g., `TwitterHttpClient` depends on auth and cookies). Use `Layer.provideMerge` to wire dependencies between layers, and `Layer.mergeAll` only for independent siblings.
+
+```ts
+// Infrastructure: HttpClient depends on CookieManager, Config
+const InfraLive = TwitterHttpClient.Live.pipe(
+  Layer.provideMerge(CookieManager.Live),
+  Layer.provideMerge(RateLimiter.Live),
+  Layer.provideMerge(TwitterConfig.FromEnv),
+  Layer.provideMerge(HttpClient.layer),
+)
+
+// Guest scraper: strategy + guest auth + infra
+const GuestScraper = ScraperStrategy.Standard.pipe(
+  Layer.provideMerge(GuestAuth.Live),
+  Layer.provideMerge(InfraLive),
+)
+
+// User scraper: strategy + user auth + infra
+const UserScraper = ScraperStrategy.Standard.pipe(
+  Layer.provideMerge(UserAuth.Live),
+  Layer.provideMerge(InfraLive),
+)
+
+// Swap strategy — replace one layer, everything else unchanged
+const AggressiveUserScraper = ScraperStrategy.Aggressive.pipe(
+  Layer.provideMerge(UserAuth.Live),
+  Layer.provideMerge(InfraLive),
+)
+```
+
+---
+
+## 4. Domain Model
 
 ### Branded Primitives
-
-Compile-time safety for identifiers. A `TweetId` cannot be passed where a `UserId` is expected.
 
 ```ts
 const TweetId = Schema.String.pipe(Schema.brand("TweetId"))
 const UserId  = Schema.String.pipe(Schema.brand("UserId"))
 const Handle  = Schema.String.pipe(Schema.brand("Handle"))
-const Cursor  = Schema.String.pipe(Schema.brand("Cursor"))
 ```
 
 ### Core Entities
 
-Defined as `Schema.Class`. Each entity exposes only clean, validated fields — Twitter's messy internals stay in the parsing layer.
+`Schema.Class` definitions. Only clean, validated fields exposed.
 
-**Tweet**
-- `id: TweetId`, `authorId: UserId`, `conversationId: TweetId`
-- `text: string`, `html: string`
-- `hashtags: string[]`, `mentions: string[]`, `urls: string[]`
-- `photos: Photo[]`, `videos: Video[]`
-- `likes: number`, `replies: number`, `retweets: number`, `views: number`
-- `timestamp: Date`
-- `isRetweet`, `isReply`, `isQuoted`, `isSelfThread`: `boolean`
-- `quotedTweet: Option<Tweet>`, `retweetedTweet: Option<Tweet>`
-- `thread: Tweet[]`
+**Tweet** — `id`, `authorId`, `conversationId`, `text`, `html`, `hashtags`, `mentions`, `urls`, `photos`, `videos`, `likes`, `replies`, `retweets`, `views`, `timestamp`, boolean flags (`isRetweet`, `isReply`, `isQuoted`, `isSelfThread`), optional nested `quotedTweet` / `retweetedTweet`, `thread`.
 
-**Profile**
-- `id: UserId`, `handle: Handle`, `name: string`
-- `avatar: string`, `banner: string`
-- `biography: string`, `location: string`, `website: string`
-- `joined: Date`
-- `followersCount`, `followingCount`, `tweetsCount`, `likesCount`: `number`
-- `isPrivate`, `isVerified`, `isBlueVerified`: `boolean`
-- `pinnedTweetIds: TweetId[]`
+**Profile** — `id`, `handle`, `name`, `avatar`, `banner`, `biography`, `location`, `website`, `joined`, counts (`followers`, `following`, `tweets`, `likes`), flags (`isPrivate`, `isVerified`, `isBlueVerified`), `pinnedTweetIds`.
 
-**DirectMessage**
-- `id: string`, `conversationId: string`
-- `senderId: UserId`, `recipientId: UserId`
-- `text: string`, `timestamp: Date`
+**DirectMessage** — `id`, `conversationId`, `senderId`, `recipientId`, `text`, `timestamp`, `reactions`.
 
 ### Raw API Schemas
 
-Separate `Schema` definitions for Twitter's GraphQL response shapes (`RawLegacyTweet`, `RawTimelineV2`, `RawSearchTimeline`, etc.). These validate the API response and transform into clean domain types. When Twitter changes their API shape, only the raw schemas and transform functions need updating — domain types stay stable.
+Separate schemas for each endpoint family's response shape. The transform boundary is explicit: `RawLegacyTweet → Tweet`, `RawTimelineV2 → Array<Tweet>`, etc. When Twitter changes their response shape, only the raw schemas and transform functions update.
 
-### Pagination
+---
 
-A generic page type used by all paginated operations:
+## 5. Pagination — Multiple Page State Types
+
+A single generic cursor does not fit all endpoints. DMs use `maxId`/`minId` with an `AT_END` status flag. Tweet timelines use a single opaque cursor string. These are different types.
+
+### TimelinePage — for tweet/profile timelines and search
 
 ```ts
-class Page<T> {
-  items: T[]
-  nextCursor: Option<Cursor>
-  previousCursor: Option<Cursor>
+class TimelinePage<T> extends Schema.Class<TimelinePage<T>>("TimelinePage")({
+  items: Schema.Array(Schema.Unknown), // parameterized at use site
+  nextCursor: Schema.OptionFromUndefinedOr(Schema.String),
+  previousCursor: Schema.OptionFromUndefinedOr(Schema.String),
+}) {}
+```
+
+Stop condition: `nextCursor` is `None` or items are empty.
+
+### DmPage — for direct message conversations
+
+```ts
+class DmPage extends Schema.Class<DmPage>("DmPage")({
+  entries: Schema.Array(DmMessageEntry),
+  status: DmStatus,           // "HAS_MORE" | "AT_END"
+  minEntryId: Schema.String,
+  maxEntryId: Schema.OptionFromUndefinedOr(Schema.String),
+}) {}
+
+class DmCursor extends Schema.Class<DmCursor>("DmCursor")({
+  maxId: Schema.OptionFromUndefinedOr(Schema.String),
+  minId: Schema.OptionFromUndefinedOr(Schema.String),
+}) {}
+```
+
+Stop condition: `status === "AT_END"` or no next cursor.
+
+### Pagination functions — one per shape
+
+```ts
+// Timeline/search pagination
+paginateTimeline<T>(
+  fetch: (cursor: Option<string>) => Effect<TimelinePage<T>, E, R>
+): Stream<T, E, R>
+
+// DM pagination
+paginateDm(
+  fetch: (cursor: Option<DmCursor>) => Effect<DmPage, E, R>
+): Stream<DmMessageEntry, E, R>
+```
+
+Both unfold a `Stream` with inter-page jitter. The stop conditions are type-specific and correct for each shape.
+
+---
+
+## 6. Error Model
+
+All errors are `Schema.TaggedError`.
+
+| Error | Fields | Retryable? |
+|-------|--------|-----------|
+| `RateLimitError` | `resetAfter`, `remaining`, `endpoint`, `bucket` | Yes — wait for reset |
+| `AuthenticationError` | `reason`, `endpoint` | Yes — refresh token, retry once |
+| `NotFoundError` | `resource`, `id` | No |
+| `SuspendedError` | `handle` | No |
+| `ApiError` | `statusCode`, `message`, `endpoint`, `family` | 5xx yes, 4xx no |
+| `ParseError` | `endpoint`, `message`, `rawBody` | No — API schema change |
+| `BotDetectionError` | `endpoint`, `statusCode` | Maybe — may need new cookies/fingerprint |
+
+Note `BotDetectionError` (HTTP 399, unexpected 404s from TLS fingerprinting). The original handles this with cipher randomization; we should model it explicitly since the recovery path is different from a normal retry.
+
+Non-standard failure: `x-rate-limit-incoming == '0'` means the token is about to be rate-limited. The original deletes the guest token proactively (`api.ts:133-134`). The strategy must handle this — it's not a 429, it's a 200 with a warning header.
+
+---
+
+## 7. Public API — Consistent Signatures
+
+All paginated operations return `Stream<T, E, R>` directly. All single-value operations return `Effect<T, E, R>`. No `Effect<Stream<...>>` wrapping.
+
+### TweetService
+
+```ts
+interface TweetService {
+  getTweet(id: TweetId): Effect<Tweet, NotFoundError | ApiError | ParseError, GuestAuth | ScraperStrategy>
+  getTweets(userId: UserId): Stream<Tweet, ApiError | ParseError, GuestAuth | ScraperStrategy>
+  getTweetsAndReplies(userId: UserId): Stream<Tweet, ApiError | ParseError, GuestAuth | ScraperStrategy>
+  getLatestTweet(userId: UserId): Effect<Option<Tweet>, ApiError | ParseError, GuestAuth | ScraperStrategy>
+  getTweetWhere(userId: UserId, predicate: (t: Tweet) => boolean): Effect<Option<Tweet>, ApiError | ParseError, GuestAuth | ScraperStrategy>
+}
+```
+
+### ProfileService
+
+```ts
+interface ProfileService {
+  getProfile(handle: Handle): Effect<Profile, NotFoundError | SuspendedError | ApiError | ParseError, GuestAuth | ScraperStrategy>
+  getFollowers(userId: UserId): Stream<Profile, AuthenticationError | ApiError | ParseError, UserAuth | ScraperStrategy>
+  getFollowing(userId: UserId): Stream<Profile, AuthenticationError | ApiError | ParseError, UserAuth | ScraperStrategy>
+}
+```
+
+Note: `getFollowers`/`getFollowing` require `UserAuth`, not `GuestAuth`.
+
+### SearchService
+
+```ts
+interface SearchService {
+  searchTweets(query: string, mode: SearchMode): Stream<Tweet, AuthenticationError | ApiError | ParseError, UserAuth | ScraperStrategy>
+  searchProfiles(query: string): Stream<Profile, AuthenticationError | ApiError | ParseError, UserAuth | ScraperStrategy>
+}
+```
+
+All search operations require `UserAuth`.
+
+### DirectMessageService
+
+```ts
+interface DirectMessageService {
+  getInbox(): Effect<DmInbox, AuthenticationError | ApiError | ParseError, UserAuth | ScraperStrategy>
+  getConversation(id: string): Stream<DmMessageEntry, AuthenticationError | ApiError | ParseError, UserAuth | ScraperStrategy>
+}
+```
+
+All DM operations require `UserAuth`.
+
+### TrendsService
+
+```ts
+interface TrendsService {
+  getTrends(): Effect<Array<string>, ApiError | ParseError, GuestAuth | ScraperStrategy>
 }
 ```
 
 ---
 
-## 3. Error Model
-
-All errors are `Schema.TaggedError` — typed, pattern-matchable, and tracked in the Effect type parameter.
-
-| Error | Fields | Retryable? |
-|-------|--------|-----------|
-| `RateLimitError` | `resetAfter: number`, `remaining: number`, `endpoint: string` | Yes — wait for reset window |
-| `AuthenticationError` | `reason: string` | Yes — refresh token, then retry |
-| `NotFoundError` | `resource: string`, `id: string` | No |
-| `SuspendedError` | `handle: Handle` | No |
-| `ApiError` | `statusCode: number`, `message: string`, `endpoint: string` | Depends on status code |
-| `ParseError` | `endpoint: string`, `message: string` | No — indicates API schema change |
-
-Domain services declare exactly which errors they can produce. The type system enforces exhaustive handling:
-
-```ts
-getTweet(id: TweetId): Effect<Tweet, NotFoundError | ApiError | ParseError, ScraperStrategy>
-searchTweets(query): Effect<Stream<Tweet>, AuthenticationError | ApiError | ParseError, ScraperStrategy>
-```
-
-The `ScraperStrategy` handles retryable errors internally (retry on `RateLimitError`, refresh on `AuthenticationError`). Non-retryable errors propagate to the caller.
-
----
-
-## 4. Infrastructure Services
-
-### TwitterAuth
-
-Manages authentication state. Two implementations as separate layers:
-
-- **`TwitterAuth.Guest`** — fetches guest tokens from `/activate`. Lazy refresh when token age exceeds 3 hours. Token stored in `Ref<Option<GuestToken>>`.
-- **`TwitterAuth.User`** — multi-step login flow with subtask handlers for password, 2FA, and CAPTCHA. Session maintained via cookies. Supports custom subtask handlers via a registry (`Ref<Map<string, SubtaskHandler>>`).
-
-Exposes: `installHeaders(request)`, `refreshToken`, `isLoggedIn`, `login(credentials)`, `logout`.
+## 8. Infrastructure Services
 
 ### TwitterHttpClient
 
-Wraps Effect's `HttpClient` with Twitter-specific middleware, composed via `HttpClient.mapRequest` / `HttpClient.mapResponseEffect`:
+Executes `ApiRequest` values. Does NOT include retry or rate limiting — that's the strategy's job.
 
-1. Base URL prefixing (`https://api.x.com/graphql/...`)
-2. Auth header injection (delegates to `TwitterAuth.installHeaders`)
-3. Chrome fingerprint headers (User-Agent, Sec-CH-UA, Sec-Fetch-*)
-4. TLS cipher randomization (platform-specific)
-5. GraphQL request builder — typed helper for constructing `variables` + `features` + `fieldToggles`
-6. Response header extraction — reads `x-rate-limit-*` headers and feeds them to the `RateLimiter`
+Responsibilities:
+1. Select bearer token based on `request.bearerTokenChoice`
+2. Delegate to `GuestAuth` or `UserAuth` for header installation based on `request.authRequirement`
+3. Apply Chrome fingerprint headers
+4. Randomize TLS ciphers (platform-specific)
+5. Execute HTTP request via Effect's `HttpClient`
+6. Extract rate-limit headers from response and feed to `RateLimiter`
+7. Parse response based on `request.family` (GraphQL nested extraction vs REST flat JSON vs HTML)
 
 ### CookieManager
 
 Owns cookie state via `Ref<CookieJar>`:
-
-- CSRF token (`ct0`) management with "never delete" protection (matches original behavior)
-- Session token (`auth_token`) persistence
-- `getCookies` / `setCookies` for external persistence (save/restore between runs)
+- CSRF token (`ct0`): never delete, even when Twitter sends `Max-Age=0`
+- Session token (`auth_token`): persistence for authenticated sessions
+- `getCookies` / `setCookies`: for external persistence between runs
 
 ### RateLimiter
 
-Per-endpoint token buckets using Effect's `RateLimiter.make`:
-
-- Tracks limits from `x-rate-limit-*` response headers
-- Default budgets per endpoint (timeline: 150/15min, search: 50/15min, profile: 95/15min)
-- Composable — global limit + per-endpoint limit applied together
-- When budget exhausted: delay (default) or fail with `RateLimitError` (configurable)
+Per-endpoint token buckets:
+- Keyed by `RateLimitBucket` (derived from endpoint ID)
+- Updated from `x-rate-limit-*` response headers after each request
+- Strategy queries the limiter before executing, decides whether to delay or fail
+- Handles the `x-rate-limit-incoming == '0'` proactive warning
 
 ### Config
 
-Loaded via `Effect.Config` from environment variables, with defaults:
+```ts
+interface TwitterConfig {
+  readonly bearerToken: Redacted       // Primary bearer token
+  readonly bearerToken2: Redacted      // Secondary (search, UserTweets, login)
+  readonly proxyUrl: Option<string>
+  readonly userAgent: string           // Default: Chrome 144 fingerprint
+  readonly timeout: Duration           // Default: 30s
+  readonly maxRetries: number          // Default: 3
+  readonly interPageDelay: Duration    // Default: 1s (+ jitter)
+}
+```
 
-| Variable | Type | Default |
-|----------|------|---------|
-| `TWITTER_BEARER_TOKEN` | `Redacted` | Built-in public token |
-| `TWITTER_BEARER_TOKEN_2` | `Redacted` | Built-in search token |
-| `TWITTER_PROXY_URL` | `Option<string>` | None |
-| `TWITTER_USER_AGENT` | `string` | Chrome 144 fingerprint |
-| `TWITTER_TIMEOUT` | `Duration` | 30 seconds |
-| `TWITTER_MAX_RETRIES` | `number` | 3 |
-
-Sensitive values use `Config.redacted` — hidden in logs and traces.
+Loaded from environment via `Effect.Config`. Sensitive values use `Config.redacted`.
 
 ---
 
-## 5. Domain Services
+## 9. Observability
 
-Each service is a `Context.Tag` with methods that return `Effect` or `Stream`. Dependencies flow through the type system — services never instantiate their own dependencies.
+Built in from the start, not bolted on later.
 
-### TweetService
+- Every service method wrapped with `Effect.withSpan("ServiceName.methodName")`
+- `ApiRequest` execution annotated with endpoint, family, auth mode
+- Rate limit events (delay, bucket exhaustion) logged via `Effect.logDebug`
+- Auth events (token refresh, login flow steps) logged via `Effect.logInfo`
+- Errors annotated with endpoint context via `Effect.annotateLogs`
 
-| Method | Return Type |
-|--------|-------------|
-| `getTweet(id)` | `Effect<Tweet, NotFoundError \| ApiError \| ParseError>` |
-| `getTweets(userId, count)` | `Stream<Tweet, ApiError \| ParseError>` |
-| `getTweetsAndReplies(userId)` | `Stream<Tweet, ApiError \| ParseError>` |
-| `getLatestTweet(userId)` | `Effect<Option<Tweet>, ApiError \| ParseError>` |
-| `getTweetWhere(userId, predicate)` | `Effect<Option<Tweet>, ApiError \| ParseError>` |
-
-### ProfileService
-
-| Method | Return Type |
-|--------|-------------|
-| `getProfile(handle)` | `Effect<Profile, NotFoundError \| SuspendedError \| ApiError \| ParseError>` |
-| `getFollowers(userId)` | `Stream<Profile, AuthenticationError \| ApiError \| ParseError>` |
-| `getFollowing(userId)` | `Stream<Profile, AuthenticationError \| ApiError \| ParseError>` |
-
-### SearchService
-
-| Method | Return Type |
-|--------|-------------|
-| `searchTweets(query, mode)` | `Stream<Tweet, AuthenticationError \| ApiError \| ParseError>` |
-| `searchProfiles(query)` | `Stream<Profile, AuthenticationError \| ApiError \| ParseError>` |
-
-`SearchMode` is a union: `Top | Latest | Photos | Videos | People`.
-
-### TimelineService
-
-The internal pagination engine. Exposes one generic function that all other services delegate to:
-
-```ts
-paginate<T>(
-  fetch: (cursor: Option<Cursor>) => Effect<Page<T>, E, R>
-): Stream<T, E, R>
-```
-
-Unfolds a `Stream` from cursor-based pagination. Inter-page delay is controlled by the `ScraperStrategy` (jitter included). Stops when the API returns no next cursor or an empty page.
-
-### DirectMessageService
-
-| Method | Return Type |
-|--------|-------------|
-| `getInbox()` | `Effect<DmInbox, AuthenticationError \| ApiError \| ParseError>` |
-| `getConversation(id)` | `Stream<DmMessage, AuthenticationError \| ApiError \| ParseError>` |
-| `getMessages(conversationId)` | `Stream<DmMessage, AuthenticationError \| ApiError \| ParseError>` |
+This integrates with Effect's OpenTelemetry support — plug in a tracing layer and every API call is a span with endpoint metadata.
 
 ---
 
-## 6. Layer Composition
+## 10. Testing
 
-The full application wires together as a single layer tree:
-
-```
-ScraperLive
-  ├── ScraperStrategy.Default
-  ├── TwitterAuth.Guest (or .User)
-  ├── TwitterHttpClient.Live
-  │     └── HttpClient.layer (Effect platform)
-  ├── CookieManager.Live
-  ├── RateLimiter.Live
-  └── TwitterConfig.FromEnv
-```
-
-### Usage
+Test layers for every service:
 
 ```ts
-const program = Effect.gen(function* () {
-  const tweets = yield* TweetService
-  const stream = yield* tweets.getTweets(UserId.make("12345"), 100)
-  return yield* Stream.runCollect(stream)
-}).pipe(Effect.provide(ScraperLive))
-
-Effect.runPromise(program)
+TwitterHttpClient.Test  // Returns canned responses keyed by EndpointId
+GuestAuth.Test          // Always has a valid token, no network
+UserAuth.Test           // Always logged in, no network
+CookieManager.Test      // In-memory jar
+RateLimiter.Test        // No limits
+ScraperStrategy.Test    // Pass-through, no retry, no delay
+TwitterConfig.Test      // Hardcoded values
 ```
 
-### Swapping Strategy
+Test the strategy separately from the domain services. Test domain parsing separately from HTTP. The layer boundaries are the test boundaries.
 
-```ts
-const aggressive = ScraperLive.pipe(
-  Layer.provide(ScraperStrategy.Aggressive)
-)
-
-const forTesting = Layer.mergeAll(
-  ScraperStrategy.Test,
-  TwitterHttpClient.Test,
-  TwitterAuth.Test,
-  CookieManager.Test,
-  RateLimiter.Test,
-  TwitterConfig.Test,
-)
-```
-
-### Isolation
-
-Two scrapers with different strategies can run in the same process. Each `Effect.provide` creates an isolated service graph — no shared mutable state leaks between them.
+Use `@effect/vitest` with `it.effect` for all tests. Use `TestClock` for retry/rate-limit timing tests.
 
 ---
 
-## 7. Project Structure
+## 11. Project Structure
 
 ```
 src/
-  index.ts                    — Public API re-exports
+  index.ts                      — Public API re-exports
   strategy/
-    ScraperStrategy.ts        — Tag, interface, Default/Aggressive/Conservative/Test layers
+    ScraperStrategy.ts          — Tag, interface, Standard/Aggressive/Conservative/Test
   domain/
-    Tweet.ts                  — Tweet schema, branded TweetId
-    Profile.ts                — Profile schema, branded Handle, UserId
-    DirectMessage.ts          — DM schemas
-    Page.ts                   — Generic Page<T> with cursors
-    SearchMode.ts             — Top | Latest | Photos | Videos | People
+    Tweet.ts                    — Tweet schema, branded TweetId
+    Profile.ts                  — Profile schema, branded Handle, UserId
+    DirectMessage.ts            — DM schemas, DmPage, DmCursor
+    TimelinePage.ts             — TimelinePage<T> for tweet/profile pagination
+    SearchMode.ts               — Top | Latest | Photos | Videos | People
   errors/
-    index.ts                  — All TaggedError definitions
+    index.ts                    — All TaggedError definitions
   services/
-    TweetService.ts           — Tag + Live layer
+    TweetService.ts             — Tag + Live layer
     ProfileService.ts
     SearchService.ts
-    TimelineService.ts        — Generic paginate function
+    TimelineService.ts          — paginateTimeline, paginateDm
     DirectMessageService.ts
+    TrendsService.ts
   infra/
-    TwitterAuth.ts            — Guest + User layers
-    TwitterHttpClient.ts      — Middleware-composed HTTP client
+    auth/
+      GuestAuth.ts              — Guest token management
+      UserAuth.ts               — Login flow, subtask handlers
+      LoginFlow.ts              — Preflight, activation, subtask loop
+    TwitterHttpClient.ts        — Middleware-composed, family-aware
     CookieManager.ts
     RateLimiter.ts
     Config.ts
+    Fingerprint.ts              — Chrome UA, Sec-CH-UA, cipher randomization
   raw/
-    types.ts                  — Raw GraphQL response schemas
-    endpoints.ts              — Endpoint URLs, operation IDs, feature flags
-    parsers.ts                — Raw → domain transformation functions
+    types.ts                    — Raw GraphQL/REST response schemas
+    endpoints.ts                — EndpointId, URLs, operation IDs, feature flags
+    parsers.ts                  — Raw → domain transforms
+    request.ts                  — ApiRequest builder, EndpointFamily, BearerTokenChoice
 ```
 
 ---
 
-## 8. Open Questions
+## 12. Changes from v1
 
-1. **Streaming backpressure**: Should `Stream`-returning methods support backpressure signaling to slow down pagination, or is inter-page jitter sufficient?
-2. **Multi-account**: Should the strategy layer support token rotation across multiple accounts, or is that a separate concern layered on top?
-3. **Persistence**: Should `CookieManager` support pluggable persistence backends (file, database), or just expose get/set for the caller to handle?
-4. **Observability**: Should we add `Effect.withSpan` tracing to every service method from the start, or add it later?
+| Issue | v1 Problem | v2 Fix |
+|-------|-----------|--------|
+| Strategy not swappable | `ScraperLive` baked in `Default` | Strategy is unsatisfied dependency; caller must provide |
+| Guest/User conflation | `TwitterAuth.Guest (or .User)` as interchangeable | `GuestAuth` and `UserAuth` are distinct types; services declare which they need in `R` |
+| Request layer too narrow | One GraphQL client | 5 endpoint families with typed `ApiRequest` carrying family, bearer token choice, auth mode |
+| Strategy too vague | `execute(httpEffect)` | `execute(ApiRequest<T>)` with full endpoint metadata |
+| Pagination too generic | One `Page<T>` with one cursor | `TimelinePage<T>` and `DmPage` with different cursor shapes and stop conditions |
+| API inconsistency | Mixed `Effect<Stream>` / `Stream` / `Effect` | Paginated → `Stream<T, E, R>`, single-value → `Effect<T, E, R>`, no wrapping |
+| Login oversimplified | "multi-step login flow" | Preflight → maybe-activate → no-CSRF → subtask loop with handler registry |
+| Rate limiting optimistic | Assumed clean 429 responses | Handles `x-rate-limit-incoming == '0'` proactive warning, `BotDetectionError` for 399/TLS 404 |
+| Observability deferred | Open question | `Effect.withSpan` on all service methods from day one |
+| Testing deferred | Open question | Test layers defined for every service, `TestClock` for timing |
