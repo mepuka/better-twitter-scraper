@@ -1,35 +1,18 @@
-import { Effect, Layer, Ref, ServiceMap } from "effect";
+import { Duration, Effect, Layer, Option, Ref, ServiceMap } from "effect";
+import * as Cookies from "effect/unstable/http/Cookies";
 
-const parseSetCookie = (
-  setCookie: string,
-): readonly [string, string] | undefined => {
-  const [pair] = setCookie.split(";");
-  if (!pair) {
-    return undefined;
-  }
+const shouldDeleteCookie = (cookie: Cookies.Cookie) =>
+  cookie.value.length === 0 ||
+  (cookie.options?.maxAge !== undefined &&
+    Duration.toMillis(Duration.fromInputUnsafe(cookie.options.maxAge)) <= 0) ||
+  (cookie.options?.expires !== undefined &&
+    cookie.options.expires.getTime() <= 0);
 
-  const separatorIndex = pair.indexOf("=");
-  if (separatorIndex <= 0) {
-    return undefined;
-  }
-
-  const name = pair.slice(0, separatorIndex).trim();
-  const value = pair.slice(separatorIndex + 1).trim();
-  if (name.length === 0) {
-    return undefined;
-  }
-
-  return [name, value] as const;
-};
-
-const shouldDeleteCookie = (setCookie: string, value: string) =>
-  value.length === 0 ||
-  /(^|;\s*)max-age=0(?:;|$)/i.test(setCookie) ||
-  /(^|;\s*)expires=thu,\s*01 jan 1970/i.test(setCookie);
-
-const snapshotStore = (store: Map<string, string>) =>
+const snapshotStore = (cookies: Cookies.Cookies) =>
   Object.fromEntries(
-    [...store.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    Object.entries(Cookies.toRecord(cookies)).sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
   );
 
 export class CookieManager extends ServiceMap.Service<
@@ -39,7 +22,7 @@ export class CookieManager extends ServiceMap.Service<
     readonly get: (name: string) => Effect.Effect<string | undefined>;
     readonly put: (name: string, value: string) => Effect.Effect<void>;
     readonly applySetCookies: (
-      setCookies: Iterable<string>,
+      setCookies: Cookies.Cookies,
     ) => Effect.Effect<void>;
     readonly snapshot: Effect.Effect<Readonly<Record<string, string>>>;
     readonly clear: Effect.Effect<void>;
@@ -56,37 +39,32 @@ export class CookieManager extends ServiceMap.Service<
       CookieManager,
       Effect.gen(function* () {
         const store = yield* Ref.make(
-          new Map<string, string>(Object.entries(initialCookies)),
+          Object.entries(initialCookies).reduce(
+            (cookies, [name, value]) => Cookies.setUnsafe(cookies, name, value),
+            Cookies.empty,
+          ),
         );
 
         const get = (name: string) =>
-          Ref.get(store).pipe(Effect.map((cookies) => cookies.get(name)));
+          Ref.get(store).pipe(
+            Effect.map((cookies) =>
+              Option.getOrUndefined(Cookies.getValue(cookies, name)),
+            ),
+          );
 
         const put = (name: string, value: string) =>
           Ref.update(store, (cookies) => {
-            const next = new Map(cookies);
-            next.set(name, value);
-            return next;
+            return Cookies.setUnsafe(cookies, name, value);
           }).pipe(Effect.asVoid);
 
-        const applySetCookies = (setCookies: Iterable<string>) =>
+        const applySetCookies = (setCookies: Cookies.Cookies) =>
           Ref.update(store, (cookies) => {
-            const next = new Map(cookies);
-
-            for (const setCookie of setCookies) {
-              const parsed = parseSetCookie(setCookie);
-              if (!parsed) {
-                continue;
-              }
-
-              const [name, value] = parsed;
-              if (shouldDeleteCookie(setCookie, value)) {
-                next.delete(name);
-              } else {
-                next.set(name, value);
-              }
+            let next = cookies;
+            for (const cookie of Object.values(setCookies.cookies)) {
+              next = shouldDeleteCookie(cookie)
+                ? Cookies.remove(next, cookie.name)
+                : Cookies.setUnsafe(next, cookie.name, cookie.value, cookie.options);
             }
-
             return next;
           }).pipe(Effect.asVoid);
 
@@ -94,16 +72,10 @@ export class CookieManager extends ServiceMap.Service<
           Effect.map((cookies) => snapshotStore(cookies)),
         );
 
-        const clear = Ref.set(store, new Map<string, string>()).pipe(
-          Effect.asVoid,
-        );
+        const clear = Ref.set(store, Cookies.empty).pipe(Effect.asVoid);
 
-        const getCookieHeader = snapshot.pipe(
-          Effect.map((cookies) =>
-            Object.entries(cookies)
-              .map(([name, value]) => `${name}=${value}`)
-              .join("; "),
-          ),
+        const getCookieHeader = Ref.get(store).pipe(
+          Effect.map((cookies) => Cookies.toCookieHeader(cookies)),
         );
 
         return {

@@ -1,4 +1,6 @@
 import { Effect, Layer, ServiceMap } from "effect";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
 import { CookieManager } from "./cookies";
 import { GuestAuth } from "./guest-auth";
@@ -9,7 +11,11 @@ import {
   ProfileNotFoundError,
   TransportError,
 } from "./errors";
-import { TwitterHttpClient } from "./http";
+import {
+  decodeJsonResponse,
+  ensureSuccessStatus,
+  mapHttpClientError,
+} from "./http-client-utils";
 import type { ApiRequest } from "./request";
 
 export type StrategyError =
@@ -32,62 +38,31 @@ export class ScraperStrategy extends ServiceMap.Service<
     Effect.gen(function* () {
       const auth = yield* GuestAuth;
       const cookies = yield* CookieManager;
-      const http = yield* TwitterHttpClient;
-
-      const decodeResponse = <A>(request: ApiRequest<A>, bodyText: string) =>
-        Effect.try({
-          try: () => {
-            const parsedBody = JSON.parse(bodyText);
-            return request.decode(parsedBody);
-          },
-          catch: (error) => {
-            if (error instanceof ProfileNotFoundError) {
-              return error;
-            }
-
-            if (error instanceof InvalidResponseError) {
-              return error;
-            }
-
-            return new InvalidResponseError({
-              endpointId: request.endpointId,
-              reason:
-                error instanceof Error
-                  ? error.message
-                  : "Failed to decode Twitter response",
-            });
-          },
-        });
+      const http = yield* HttpClient.HttpClient;
 
       const executeOnce = <A>(request: ApiRequest<A>) =>
         Effect.gen(function* () {
           const headers = yield* auth.headersFor({
-            url: request.url,
             family: request.family,
             bearerToken: request.bearerToken,
           });
 
-          const response = yield* http.execute({
-            method: request.method,
-            url: request.url,
-            headers,
-          });
+          const response = yield* http.execute(
+            request.request.pipe(HttpClientRequest.setHeaders(headers)),
+          ).pipe(Effect.mapError(mapHttpClientError));
 
-          yield* cookies.applySetCookies(response.setCookies);
+          yield* cookies.applySetCookies(response.cookies);
 
           if (response.headers["x-rate-limit-incoming"] === "0") {
             yield* auth.invalidate;
           }
 
-          if (response.status < 200 || response.status >= 300) {
-            return yield* new HttpStatusError({
-              endpointId: request.endpointId,
-              status: response.status,
-              body: response.bodyText.slice(0, 500),
-            });
-          }
+          const okResponse = yield* ensureSuccessStatus(
+            request.endpointId,
+            response,
+          );
 
-          return yield* decodeResponse(request, response.bodyText);
+          return yield* decodeJsonResponse(request, okResponse);
         });
 
       const execute = (request: ApiRequest<unknown>) =>

@@ -13,6 +13,7 @@ export * from "./src/endpoints";
 export * from "./src/errors";
 export * from "./src/guest-auth";
 export * from "./src/http";
+export * from "./src/http-client-utils";
 export * from "./src/models";
 export * from "./src/public";
 export * from "./src/request";

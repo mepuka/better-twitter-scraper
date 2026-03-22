@@ -1,7 +1,11 @@
-import { Effect, Layer, Ref, ServiceMap } from "effect";
+import { Effect, Layer, Ref } from "effect";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
-import { TransportError } from "./errors";
-import type { RawHttpRequest, RawHttpResponse } from "./request";
+import { httpClientRequestUrl } from "./request";
 
 export interface ScriptedHttpResponse {
   readonly status: number;
@@ -13,137 +17,83 @@ export interface ScriptedHttpResponse {
 
 export type HttpScript = Readonly<Record<string, readonly ScriptedHttpResponse[]>>;
 
-export const httpRequestKey = (request: Pick<RawHttpRequest, "method" | "url">) =>
-  `${request.method} ${request.url}`;
+const requestUrl = (
+  request: HttpClientRequest.HttpClientRequest | Pick<HttpClientRequest.HttpClientRequest, "url">,
+) => ("urlParams" in request ? httpClientRequestUrl(request) : request.url);
 
-const normalizeHeaders = (headers: Headers): Readonly<Record<string, string>> => {
-  const normalized: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    normalized[key.toLowerCase()] = value;
-  });
-  return normalized;
-};
+export const httpRequestKey = (
+  request:
+    | HttpClientRequest.HttpClientRequest
+    | Pick<HttpClientRequest.HttpClientRequest, "method" | "url">,
+) => `${request.method} ${requestUrl(request)}`;
 
-const extractSetCookies = (headers: Headers): readonly string[] => {
-  const candidate = headers as Headers & {
-    getSetCookie?: () => string[];
-  };
+const toBodyText = (response: ScriptedHttpResponse) =>
+  response.bodyText ??
+  (response.json === undefined ? "" : JSON.stringify(response.json));
 
-  if (typeof candidate.getSetCookie === "function") {
-    const setCookies = candidate.getSetCookie();
-    if (setCookies.length > 0) {
-      return setCookies;
-    }
+const toWebResponse = (response: ScriptedHttpResponse) => {
+  const headers = new Headers();
+
+  for (const [key, value] of Object.entries(response.headers ?? {})) {
+    headers.set(key, value);
   }
 
-  const singleHeader = headers.get("set-cookie");
-  return singleHeader ? [singleHeader] : [];
-};
+  for (const setCookie of response.setCookies ?? []) {
+    headers.append("set-cookie", setCookie);
+  }
 
-const toRawHttpResponse = (response: ScriptedHttpResponse): RawHttpResponse => ({
-  status: response.status,
-  headers: Object.fromEntries(
-    Object.entries(response.headers ?? {}).map(([key, value]) => [
-      key.toLowerCase(),
-      value,
-    ]),
-  ),
-  setCookies: response.setCookies ?? [],
-  bodyText:
-    response.bodyText ??
-    (response.json === undefined ? "" : JSON.stringify(response.json)),
-});
+  return new Response(toBodyText(response), {
+    status: response.status,
+    headers,
+  });
+};
 
 const cloneScript = (script: HttpScript): Record<string, ScriptedHttpResponse[]> =>
   Object.fromEntries(
     Object.entries(script).map(([key, responses]) => [key, [...responses]]),
   );
 
-export class TwitterHttpClient extends ServiceMap.Service<
-  TwitterHttpClient,
-  {
-    readonly execute: (
-      request: RawHttpRequest,
-    ) => Effect.Effect<RawHttpResponse, TransportError>;
-  }
->()("@better-twitter-scraper/TwitterHttpClient") {
-  static readonly liveLayer = Layer.succeed(TwitterHttpClient, {
-    execute: Effect.fn("TwitterHttpClient.execute")(function* (
-      request: RawHttpRequest,
-    ) {
-      const response = yield* Effect.tryPromise({
-        try: () =>
-          fetch(request.url, {
-            method: request.method,
-            headers: request.headers,
-            body: request.body,
-          }),
-        catch: (error) =>
-          new TransportError({
-            url: request.url,
-            reason: "Network request failed",
-            error,
-          }),
-      });
-
-      const bodyText = yield* Effect.tryPromise({
-        try: () => response.text(),
-        catch: (error) =>
-          new TransportError({
-            url: request.url,
-            reason: "Failed to read response body",
-            error,
-          }),
-      });
-
-      return {
-        status: response.status,
-        headers: normalizeHeaders(response.headers),
-        setCookies: extractSetCookies(response.headers),
-        bodyText,
-      };
-    }),
-  });
+export class TwitterHttpClient {
+  static readonly liveLayer = FetchHttpClient.layer;
 
   static scriptedLayer(script: HttpScript) {
     return Layer.effect(
-      TwitterHttpClient,
+      HttpClient.HttpClient,
       Effect.gen(function* () {
         const state = yield* Ref.make(cloneScript(script));
 
-        const execute = Effect.fn("TwitterHttpClient.execute")(function* (
-          request: RawHttpRequest,
-        ) {
-          const key = httpRequestKey(request);
+        return HttpClient.make((request) =>
+          Effect.gen(function* () {
+            const key = httpRequestKey(request);
 
-          const scriptedResponse = yield* Ref.modify(state, (current) => {
-            const responses = current[key];
-            if (!responses || responses.length === 0) {
-              return [undefined, current] as const;
+            const scriptedResponse = yield* Ref.modify(state, (current) => {
+              const responses = current[key];
+              if (!responses || responses.length === 0) {
+                return [undefined, current] as const;
+              }
+
+              const [nextResponse, ...remaining] = responses;
+              return [
+                nextResponse,
+                {
+                  ...current,
+                  [key]: remaining,
+                },
+              ] as const;
+            });
+
+            if (!scriptedResponse) {
+              return yield* new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({
+                  request,
+                  description: `No scripted response for ${key}`,
+                }),
+              });
             }
 
-            const [nextResponse, ...remaining] = responses;
-            return [
-              nextResponse,
-              {
-                ...current,
-                [key]: remaining,
-              },
-            ] as const;
-          });
-
-          if (!scriptedResponse) {
-            return yield* new TransportError({
-              url: request.url,
-              reason: `No scripted response for ${key}`,
-              error: new Error(`No scripted response for ${key}`),
-            });
-          }
-
-          return toRawHttpResponse(scriptedResponse);
-        });
-
-        return { execute };
+            return HttpClientResponse.fromWeb(request, toWebResponse(scriptedResponse));
+          }),
+        );
       }),
     );
   }

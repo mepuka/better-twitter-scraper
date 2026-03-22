@@ -1,38 +1,30 @@
-import { Clock, Effect, Layer, Option, Ref, ServiceMap } from "effect";
+import { Clock, Effect, Layer, Option, Ref, Schema, ServiceMap } from "effect";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
 import { CookieManager } from "./cookies";
-import { TwitterConfig, type TwitterConfigShape } from "./config";
+import { TwitterConfig } from "./config";
 import {
   GuestTokenError,
   HttpStatusError,
   InvalidResponseError,
   TransportError,
 } from "./errors";
-import { TwitterHttpClient } from "./http";
+import {
+  ensureSuccessStatus,
+  mapHttpClientError,
+} from "./http-client-utils";
 import type { BearerTokenName, EndpointFamily } from "./request";
 
-const browserHeaders = (
-  config: TwitterConfigShape,
-): Readonly<Record<string, string>> => ({
-  "user-agent": config.browser.userAgent,
-  accept: "*/*",
-  "accept-language": "en-US,en;q=0.9",
-  "sec-ch-ua": config.browser.secChUa,
-  "sec-ch-ua-mobile": "?0",
-  "sec-ch-ua-platform": "\"Windows\"",
-  referer: "https://x.com/",
-  origin: "https://x.com",
-  "sec-fetch-site": "same-site",
-  "sec-fetch-mode": "cors",
-  "sec-fetch-dest": "empty",
-  priority: "u=1, i",
+const GuestActivationPayload = Schema.Struct({
+  guest_token: Schema.String,
 });
 
 export class GuestAuth extends ServiceMap.Service<
   GuestAuth,
   {
     readonly headersFor: (options: {
-      readonly url: string;
       readonly family: EndpointFamily;
       readonly bearerToken: BearerTokenName;
     }) => Effect.Effect<
@@ -55,7 +47,7 @@ export class GuestAuth extends ServiceMap.Service<
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
       const cookies = yield* CookieManager;
-      const http = yield* TwitterHttpClient;
+      const http = yield* HttpClient.HttpClient;
       const tokenRef = yield* Ref.make(Option.none<string>());
       const authenticatedAtRef = yield* Ref.make(Option.none<number>());
 
@@ -64,43 +56,71 @@ export class GuestAuth extends ServiceMap.Service<
         yield* Ref.set(authenticatedAtRef, Option.none<number>());
       });
 
+      const headersFor = Effect.fn("GuestAuth.headersFor")(function* (options: {
+        readonly family: EndpointFamily;
+        readonly bearerToken: BearerTokenName;
+      }) {
+        const cookieHeader = yield* cookies.getCookieHeader;
+        const csrfToken = yield* cookies.get("ct0");
+
+        const headers: Record<string, string> = {
+          ...config.requestProfile.commonHeaders,
+          authorization: `Bearer ${
+            options.bearerToken === "secondary"
+              ? config.bearerTokens.secondary
+              : config.bearerTokens.default
+          }`,
+        };
+
+        if (options.family === "graphql") {
+          Object.assign(headers, config.requestProfile.graphqlHeaders);
+        }
+
+        if (cookieHeader) {
+          headers.cookie = cookieHeader;
+        }
+
+        if (csrfToken) {
+          headers["x-csrf-token"] = csrfToken;
+        }
+
+        if (options.bearerToken === "default") {
+          headers["x-guest-token"] = yield* currentToken();
+        }
+
+        return headers;
+      });
+
       const activate = Effect.fn("GuestAuth.activate")(function* () {
         const cookieHeader = yield* cookies.getCookieHeader;
-        const response = yield* http.execute({
-          method: "POST",
-          url: config.guestActivateUrl,
-          headers: {
-            ...browserHeaders(config),
+        const request = HttpClientRequest.post(config.urls.guestActivate).pipe(
+          HttpClientRequest.bodyUrlParams({}),
+          HttpClientRequest.setHeaders({
+            ...config.requestProfile.commonHeaders,
             authorization: `Bearer ${config.bearerTokens.default}`,
-            "content-type": "application/x-www-form-urlencoded",
             ...(cookieHeader ? { cookie: cookieHeader } : {}),
-          },
-        });
+          }),
+        );
 
-        yield* cookies.applySetCookies(response.setCookies);
+        const response = yield* http.execute(request).pipe(
+          Effect.mapError(mapHttpClientError),
+        );
 
-        if (response.status < 200 || response.status >= 300) {
-          return yield* new HttpStatusError({
-            endpointId: "GuestActivate",
-            status: response.status,
-            body: response.bodyText.slice(0, 500),
-          });
-        }
+        yield* cookies.applySetCookies(response.cookies);
 
-        const payload = yield* Effect.try({
-          try: () => JSON.parse(response.bodyText) as { guest_token?: unknown },
-          catch: () =>
-            new InvalidResponseError({
-              endpointId: "GuestActivate",
-              reason: "Guest activation returned invalid JSON",
-            }),
-        });
+        const okResponse = yield* ensureSuccessStatus("GuestActivate", response);
 
-        if (typeof payload.guest_token !== "string") {
-          return yield* new GuestTokenError({
-            reason: "guest_token was missing from the activation response",
-          });
-        }
+        const payload = yield* HttpClientResponse.schemaBodyJson(
+          GuestActivationPayload,
+        )(okResponse).pipe(
+          Effect.mapError(
+            (error) =>
+              new InvalidResponseError({
+                endpointId: "GuestActivate",
+                reason: error.message,
+              }),
+          ),
+        );
 
         const now = yield* Clock.currentTimeMillis;
         yield* cookies.put("gt", payload.guest_token);
@@ -124,42 +144,6 @@ export class GuestAuth extends ServiceMap.Service<
         }
 
         return yield* activate();
-      });
-
-      const headersFor = Effect.fn("GuestAuth.headersFor")(function* (options: {
-        readonly url: string;
-        readonly family: EndpointFamily;
-        readonly bearerToken: BearerTokenName;
-      }) {
-        const cookieHeader = yield* cookies.getCookieHeader;
-        const csrfToken = yield* cookies.get("ct0");
-
-        const headers: Record<string, string> = {
-          ...browserHeaders(config),
-          authorization: `Bearer ${
-            options.bearerToken === "secondary"
-              ? config.bearerTokens.secondary
-              : config.bearerTokens.default
-          }`,
-        };
-
-        if (options.family === "graphql") {
-          headers["content-type"] = "application/json";
-        }
-
-        if (cookieHeader) {
-          headers.cookie = cookieHeader;
-        }
-
-        if (csrfToken) {
-          headers["x-csrf-token"] = csrfToken;
-        }
-
-        if (options.bearerToken === "default") {
-          headers["x-guest-token"] = yield* currentToken();
-        }
-
-        return headers;
       });
 
       const snapshot = Effect.gen(function* () {

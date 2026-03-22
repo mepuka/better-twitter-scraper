@@ -1,3 +1,5 @@
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+
 import type { Profile, TimelinePage, Tweet } from "./models";
 import { parseProfileResponse, parseTimelinePageResponse } from "./parsers";
 import type { ApiRequest } from "./request";
@@ -9,11 +11,84 @@ interface EndpointTemplate {
   readonly fieldToggles?: Record<string, unknown>;
 }
 
-const USER_BY_SCREEN_NAME_EXAMPLE =
-  "https://api.x.com/graphql/AWbeRIdkLtqTRN7yL_H8yw/UserByScreenName?variables=%7B%22screen_name%22%3A%22elonmusk%22%2C%22withGrokTranslatedBio%22%3Atrue%7D&features=%7B%22hidden_profile_subscriptions_enabled%22%3Atrue%2C%22profile_label_improvements_pcf_label_in_post_enabled%22%3Atrue%2C%22responsive_web_profile_redirect_enabled%22%3Afalse%2C%22rweb_tipjar_consumption_enabled%22%3Afalse%2C%22verified_phone_label_enabled%22%3Afalse%2C%22subscriptions_verification_info_is_identity_verified_enabled%22%3Atrue%2C%22subscriptions_verification_info_verified_since_enabled%22%3Atrue%2C%22highlights_tweets_tab_ui_enabled%22%3Atrue%2C%22responsive_web_twitter_article_notes_tab_enabled%22%3Atrue%2C%22subscriptions_feature_can_gift_premium%22%3Atrue%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%7D&fieldToggles=%7B%22withPayments%22%3Afalse%2C%22withAuxiliaryUserLabels%22%3Atrue%7D";
-
-const USER_TWEETS_EXAMPLE =
-  "https://api.x.com/graphql/N2tFDY-MlrLxXJ9F_ZxJGA/UserTweets?variables=%7B%22userId%22%3A%2244196397%22%2C%22count%22%3A20%2C%22includePromotedContent%22%3Atrue%2C%22withQuickPromoteEligibilityTweetFields%22%3Atrue%2C%22withVoice%22%3Atrue%7D&features=%7B%22rweb_video_screen_enabled%22%3Afalse%2C%22profile_label_improvements_pcf_label_in_post_enabled%22%3Atrue%2C%22responsive_web_profile_redirect_enabled%22%3Afalse%2C%22rweb_tipjar_consumption_enabled%22%3Afalse%2C%22verified_phone_label_enabled%22%3Afalse%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22premium_content_api_read_enabled%22%3Afalse%2C%22communities_web_enable_tweet_community_results_fetch%22%3Atrue%2C%22c9s_tweet_anatomy_moderator_badge_enabled%22%3Atrue%2C%22responsive_web_grok_analyze_button_fetch_trends_enabled%22%3Afalse%2C%22responsive_web_grok_analyze_post_followups_enabled%22%3Atrue%2C%22responsive_web_jetfuel_frame%22%3Atrue%2C%22responsive_web_grok_share_attachment_enabled%22%3Atrue%2C%22responsive_web_grok_annotations_enabled%22%3Atrue%2C%22articles_preview_enabled%22%3Atrue%2C%22responsive_web_edit_tweet_api_enabled%22%3Atrue%2C%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3Atrue%2C%22view_counts_everywhere_api_enabled%22%3Atrue%2C%22longform_notetweets_consumption_enabled%22%3Atrue%2C%22responsive_web_twitter_article_tweet_consumption_enabled%22%3Atrue%2C%22tweet_awards_web_tipping_enabled%22%3Afalse%2C%22responsive_web_grok_show_grok_translated_post%22%3Atrue%2C%22responsive_web_grok_analysis_button_from_backend%22%3Atrue%2C%22post_ctas_fetch_enabled%22%3Atrue%2C%22freedom_of_speech_not_reach_fetch_enabled%22%3Atrue%2C%22standardized_nudges_misinfo%22%3Atrue%2C%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3Atrue%2C%22longform_notetweets_rich_text_read_enabled%22%3Atrue%2C%22longform_notetweets_inline_media_enabled%22%3Atrue%2C%22responsive_web_grok_image_annotation_enabled%22%3Atrue%2C%22responsive_web_grok_imagine_annotation_enabled%22%3Atrue%2C%22responsive_web_grok_community_note_auto_translation_is_enabled%22%3Afalse%2C%22responsive_web_enhance_cards_enabled%22%3Afalse%7D&fieldToggles=%7B%22withArticlePlainText%22%3Afalse%7D";
+const endpointTemplates = {
+  userByScreenName: {
+    url: "https://api.x.com/graphql/AWbeRIdkLtqTRN7yL_H8yw/UserByScreenName",
+    variables: {
+      screen_name: "elonmusk",
+      withGrokTranslatedBio: true,
+    },
+    features: {
+      hidden_profile_subscriptions_enabled: true,
+      profile_label_improvements_pcf_label_in_post_enabled: true,
+      responsive_web_profile_redirect_enabled: false,
+      rweb_tipjar_consumption_enabled: false,
+      verified_phone_label_enabled: false,
+      subscriptions_verification_info_is_identity_verified_enabled: true,
+      subscriptions_verification_info_verified_since_enabled: true,
+      highlights_tweets_tab_ui_enabled: true,
+      responsive_web_twitter_article_notes_tab_enabled: true,
+      subscriptions_feature_can_gift_premium: true,
+      creator_subscriptions_tweet_preview_api_enabled: true,
+      responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+      responsive_web_graphql_timeline_navigation_enabled: true,
+    },
+    fieldToggles: {
+      withPayments: false,
+      withAuxiliaryUserLabels: true,
+    },
+  },
+  userTweets: {
+    url: "https://api.x.com/graphql/N2tFDY-MlrLxXJ9F_ZxJGA/UserTweets",
+    variables: {
+      userId: "44196397",
+      count: 20,
+      includePromotedContent: true,
+      withQuickPromoteEligibilityTweetFields: true,
+      withVoice: true,
+    },
+    features: {
+      rweb_video_screen_enabled: false,
+      profile_label_improvements_pcf_label_in_post_enabled: true,
+      responsive_web_profile_redirect_enabled: false,
+      rweb_tipjar_consumption_enabled: false,
+      verified_phone_label_enabled: false,
+      creator_subscriptions_tweet_preview_api_enabled: true,
+      responsive_web_graphql_timeline_navigation_enabled: true,
+      responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+      premium_content_api_read_enabled: false,
+      communities_web_enable_tweet_community_results_fetch: true,
+      c9s_tweet_anatomy_moderator_badge_enabled: true,
+      responsive_web_grok_analyze_button_fetch_trends_enabled: false,
+      responsive_web_grok_analyze_post_followups_enabled: true,
+      responsive_web_jetfuel_frame: true,
+      responsive_web_grok_share_attachment_enabled: true,
+      responsive_web_grok_annotations_enabled: true,
+      articles_preview_enabled: true,
+      responsive_web_edit_tweet_api_enabled: true,
+      graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+      view_counts_everywhere_api_enabled: true,
+      longform_notetweets_consumption_enabled: true,
+      responsive_web_twitter_article_tweet_consumption_enabled: true,
+      tweet_awards_web_tipping_enabled: false,
+      responsive_web_grok_show_grok_translated_post: true,
+      responsive_web_grok_analysis_button_from_backend: true,
+      post_ctas_fetch_enabled: true,
+      freedom_of_speech_not_reach_fetch_enabled: true,
+      standardized_nudges_misinfo: true,
+      tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+      longform_notetweets_rich_text_read_enabled: true,
+      longform_notetweets_inline_media_enabled: true,
+      responsive_web_grok_image_annotation_enabled: true,
+      responsive_web_grok_imagine_annotation_enabled: true,
+      responsive_web_grok_community_note_auto_translation_is_enabled: false,
+      responsive_web_enhance_cards_enabled: false,
+    },
+    fieldToggles: {
+      withArticlePlainText: false,
+    },
+  },
+} satisfies Readonly<Record<string, EndpointTemplate>>;
 
 const normalizeForJson = (value: unknown): unknown => {
   if (Array.isArray(value)) {
@@ -33,22 +108,6 @@ const normalizeForJson = (value: unknown): unknown => {
 };
 
 const stableJson = (value: unknown) => JSON.stringify(normalizeForJson(value));
-
-const parseEndpointTemplate = (exampleUrl: string): EndpointTemplate => {
-  const { protocol, host, pathname, searchParams } = new URL(exampleUrl);
-  return {
-    url: `${protocol}//${host}${pathname}`,
-    variables: searchParams.get("variables")
-      ? JSON.parse(searchParams.get("variables")!)
-      : undefined,
-    features: searchParams.get("features")
-      ? JSON.parse(searchParams.get("features")!)
-      : undefined,
-    fieldToggles: searchParams.get("fieldToggles")
-      ? JSON.parse(searchParams.get("fieldToggles")!)
-      : undefined,
-  };
-};
 
 const buildUrl = (
   template: EndpointTemplate,
@@ -79,9 +138,6 @@ const buildUrl = (
   return `${template.url}?${params.toString()}`;
 };
 
-const userByScreenNameTemplate = parseEndpointTemplate(USER_BY_SCREEN_NAME_EXAMPLE);
-const userTweetsTemplate = parseEndpointTemplate(USER_TWEETS_EXAMPLE);
-
 export const endpointRegistry = {
   userByScreenName(username: string): ApiRequest<Profile> {
     return {
@@ -90,13 +146,14 @@ export const endpointRegistry = {
       authRequirement: "guest",
       bearerToken: "secondary",
       rateLimitBucket: "profileLookup",
-      method: "GET",
-      url: buildUrl(userByScreenNameTemplate, {
-        variables: {
-          ...userByScreenNameTemplate.variables,
-          screen_name: username,
-        },
-      }),
+      request: HttpClientRequest.get(
+        buildUrl(endpointTemplates.userByScreenName, {
+          variables: {
+            ...endpointTemplates.userByScreenName.variables,
+            screen_name: username,
+          },
+        }),
+      ),
       decode: (body) => parseProfileResponse(body, username),
     };
   },
@@ -104,6 +161,7 @@ export const endpointRegistry = {
   userTweets(
     userId: string,
     count: number,
+    includePromotedContent: boolean,
     cursor?: string,
   ): ApiRequest<TimelinePage<Tweet>> {
     return {
@@ -112,16 +170,17 @@ export const endpointRegistry = {
       authRequirement: "guest",
       bearerToken: "secondary",
       rateLimitBucket: "userTweets",
-      method: "GET",
-      url: buildUrl(userTweetsTemplate, {
-        variables: {
-          ...userTweetsTemplate.variables,
-          userId,
-          count,
-          includePromotedContent: false,
-          cursor,
-        },
-      }),
+      request: HttpClientRequest.get(
+        buildUrl(endpointTemplates.userTweets, {
+          variables: {
+            ...endpointTemplates.userTweets.variables,
+            userId,
+            count,
+            includePromotedContent,
+            cursor,
+          },
+        }),
+      ),
       decode: parseTimelinePageResponse,
     };
   },

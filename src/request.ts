@@ -1,3 +1,6 @@
+import { Option } from "effect";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+
 export type EndpointFamily = "graphql";
 export type AuthRequirement = "guest";
 export type BearerTokenName = "default" | "secondary";
@@ -14,21 +17,14 @@ export interface ApiRequest<A> {
   readonly authRequirement: AuthRequirement;
   readonly bearerToken: BearerTokenName;
   readonly rateLimitBucket: RateLimitBucket;
-  readonly method: "GET" | "POST";
-  readonly url: string;
+  readonly request: HttpClientRequest.HttpClientRequest;
   readonly decode: (body: unknown) => A;
 }
 
-export interface RawHttpRequest {
-  readonly method: "GET" | "POST";
-  readonly url: string;
-  readonly headers: Readonly<Record<string, string>>;
-  readonly body?: string;
-}
-
-export interface RawHttpResponse {
-  readonly status: number;
-  readonly headers: Readonly<Record<string, string>>;
-  readonly setCookies: readonly string[];
-  readonly bodyText: string;
-}
+export const httpClientRequestUrl = (
+  request: HttpClientRequest.HttpClientRequest,
+) =>
+  Option.match(HttpClientRequest.toUrl(request), {
+    onNone: () => request.url,
+    onSome: (url) => url.toString(),
+  });

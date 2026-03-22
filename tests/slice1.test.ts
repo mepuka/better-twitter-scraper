@@ -1,4 +1,5 @@
 import { Effect, Layer, Stream } from "effect";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -39,8 +40,10 @@ describe("Slice 1 request registry", () => {
     expect(request.endpointId).toBe("UserByScreenName");
     expect(request.bearerToken).toBe("secondary");
     expect(request.rateLimitBucket).toBe("profileLookup");
-    expect(request.url).toContain("UserByScreenName");
-    expect(decodeURIComponent(request.url)).toContain("\"screen_name\":\"nomadic_ua\"");
+    expect(request.request.url).toContain("UserByScreenName");
+    expect(decodeURIComponent(request.request.url)).toContain(
+      "\"screen_name\":\"nomadic_ua\"",
+    );
   });
 });
 
@@ -60,10 +63,8 @@ describe("Slice 1 public reads", () => {
       }).pipe(
         Effect.provide(
           publicTestLayer({
-            [httpRequestKey({
-              method: "GET",
-              url: endpointRegistry.userByScreenName("nomadic_ua").url,
-            })]: [{ status: 200, json: profileFixture }],
+            [httpRequestKey(endpointRegistry.userByScreenName("nomadic_ua").request)]:
+              [{ status: 200, json: profileFixture }],
           }),
         ),
       ),
@@ -95,18 +96,14 @@ describe("Slice 1 public reads", () => {
       }).pipe(
         Effect.provide(
           publicTestLayer({
-            [httpRequestKey({
-              method: "GET",
-              url: endpointRegistry.userByScreenName("nomadic_ua").url,
-            })]: [{ status: 200, json: profileFixture }],
-            [httpRequestKey({
-              method: "GET",
-              url: endpointRegistry.userTweets("106037940", 10).url,
-            })]: [{ status: 200, json: tweetsPageOneFixture }],
-            [httpRequestKey({
-              method: "GET",
-              url: endpointRegistry.userTweets("106037940", 8, "cursor-1").url,
-            })]: [{ status: 200, json: tweetsPageTwoFixture }],
+            [httpRequestKey(endpointRegistry.userByScreenName("nomadic_ua").request)]:
+              [{ status: 200, json: profileFixture }],
+            [httpRequestKey(
+              endpointRegistry.userTweets("106037940", 10, false).request,
+            )]: [{ status: 200, json: tweetsPageOneFixture }],
+            [httpRequestKey(
+              endpointRegistry.userTweets("106037940", 8, false, "cursor-1").request,
+            )]: [{ status: 200, json: tweetsPageTwoFixture }],
           }),
         ),
       ),
@@ -127,8 +124,9 @@ describe("Slice 1 guest token handling", () => {
         authRequirement: "guest",
         bearerToken: "default",
         rateLimitBucket: "generic",
-        method: "GET",
-        url: "https://api.x.com/graphql/test/TestDefaultBearer",
+        request: HttpClientRequest.get(
+          "https://api.x.com/graphql/test/TestDefaultBearer",
+        ),
         decode: (body) => {
           const value = (body as { value?: unknown }).value;
           if (typeof value !== "string") {

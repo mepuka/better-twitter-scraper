@@ -49,7 +49,8 @@ export class TwitterPublic extends ServiceMap.Service<
         return yield* (strategy.execute(
           endpointRegistry.userTweets(
             userId,
-            Math.min(count, config.maxTimelinePageSize),
+            Math.min(count, config.timeline.maxPageSize),
+            config.timeline.includePromotedContent,
             cursor,
           ),
         ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>);
@@ -69,7 +70,7 @@ export class TwitterPublic extends ServiceMap.Service<
 
             const initialState: TweetStreamState = {
               userId,
-              remaining: options.limit ?? 20,
+              remaining: options.limit ?? config.timeline.defaultLimit,
               seenCursors: new Set<string>(),
             };
 
