@@ -426,9 +426,151 @@ Test the strategy separately from the domain services. Test domain parsing separ
 
 Use `@effect/vitest` with `it.effect` for all tests. Use `TestClock` for retry/rate-limit timing tests.
 
+### Two test lanes
+
+The project must maintain two test lanes from the beginning:
+
+1. **Deterministic local tests** — no network, fixture-driven, fully controlled. These cover raw parsing, request construction, retry timing, auth state transitions, cookie rules, and pagination stop conditions.
+2. **Opt-in live canaries** — low-volume real requests that only run when credentials or cookies are available. These prove the abstractions still match Twitter/X reality.
+
+The deterministic lane is the default and must be comprehensive. The live-canary lane is smaller, slower, and explicitly gated by environment variables, but it is required before advancing major slices.
+
+### Scripted HTTP test harness
+
+`TwitterHttpClient.Test` must support more than static canned responses keyed by endpoint. The messy parts of this project require scripted sequences:
+
+- login flow steps returning different subtasks over time
+- retryable failures followed by recovery
+- cookie mutations across responses
+- rate-limit headers and warning headers (`x-rate-limit-incoming == '0'`)
+- repeated pages, duplicate cursors, and end-of-history conditions
+
+The test harness should model these as response scripts or scenarios, not just one response per endpoint.
+
 ---
 
-## 11. Project Structure
+## 11. Implementation Slices and Gates
+
+The team should not implement the whole surface area in parallel. This project needs staged proof points. A slice is only complete when it passes both deterministic local tests and the required live canaries for that slice.
+
+### Slice 1 — Guest Read-Only Foundation
+
+Build:
+
+- `ApiRequest`
+- endpoint registry for the GraphQL family
+- `GuestAuth`
+- `TwitterHttpClient`
+- `CookieManager`
+- `ScraperStrategy.Standard`
+- one single-value public read (`getTweet` or `getProfile`)
+- one paginated public read (`getTweets`)
+
+This slice proves:
+
+- guest token setup works
+- request metadata is sufficient
+- one public endpoint works end to end
+- pagination works for at least one public timeline path
+
+Required gates before moving on:
+
+- fixture tests for request construction and raw parsing
+- deterministic tests for guest-token refresh and warning-header handling
+- deterministic tests for pagination stop conditions and duplicate-cursor protection
+- one live anonymous smoke test for a single-item read
+- one live anonymous smoke test for a paginated public timeline read
+
+Do not move on until one public single read and one public paginated read both pass live.
+
+### Slice 2 — Cookie-Restored Authenticated Reads
+
+Build:
+
+- cookie serialization and restore
+- `UserAuth` session detection
+- one authenticated GraphQL endpoint, preferably search
+- followers/following only after search is stable
+
+This slice proves:
+
+- the guest/user type split matches real behavior
+- restored cookies are enough to unlock user-only endpoints
+- anonymous callers are rejected for authenticated-only operations
+
+Required gates before moving on:
+
+- deterministic tests for `isLoggedIn`
+- deterministic tests for cookie serialization and restore
+- deterministic tests proving guest-only setups fail for user-only services
+- one live cookie-based smoke test for session restore
+- one live cookie-based smoke test for authenticated search
+
+Do not move on until restored-cookie auth works live and anonymous access fails cleanly for at least one user-only endpoint.
+
+### Slice 3 — Resilience and Failure Classification
+
+Build:
+
+- retry classification
+- header-driven rate-limit handling
+- `x-rate-limit-incoming == '0'` proactive token reset
+- `BotDetectionError`
+- trace and log annotations
+
+This slice proves:
+
+- failures are classified correctly
+- retry timing is deterministic under test
+- the strategy handles warning-header and rate-limit paths without hitting live endpoints repeatedly
+
+Required gates before moving on:
+
+- `TestClock` tests for retry and backoff timing
+- fixture tests for 429, 401/403, warning-header, parse-drift, and bot-detection cases
+- one low-volume live smoke test proving logs and spans include endpoint context for a guest request
+- one low-volume live smoke test proving logs and spans include endpoint context for an authenticated request
+
+Do not move on until retry behavior and failure classification are deterministic in local tests.
+
+### Slice 4 — Password Login Automation and Direct Messages
+
+Build:
+
+- `LoginFlow`
+- preflight page visit
+- fallback activation
+- no-CSRF login path
+- subtask handler registry
+- DM inbox and conversation pagination
+- optional alternate strategies after the standard path is already proven
+
+This slice proves:
+
+- the most brittle flows are isolated until the rest of the system already works
+- login automation is layered on top of a proven authenticated baseline
+- DM-specific pagination behavior is correct
+
+Required gates before moving on:
+
+- scripted auth tests covering login subtasks, 2FA retries, bad subtasks, and logout
+- deterministic tests for DM cursor movement and `AT_END` handling
+- opt-in live password-login smoke tests only when the required env vars are present
+- opt-in live DM smoke tests only when authenticated cookies are available
+
+Password login is not a prerequisite for earlier implementation progress. Cookie restore is the early authenticated baseline.
+
+### Checkpoint Policy
+
+- Do not add a new endpoint family until one concrete endpoint in the current family has both deterministic coverage and a live canary.
+- Do not add a new public service until at least one real request through its full stack has passed live.
+- Do not implement `Aggressive` or `Conservative` before `Standard` has passed its guest and authenticated live canaries.
+- Do not treat password-login automation as the first authenticated milestone.
+- Treat DMs as a late-slice feature, not a foundation feature.
+
+---
+
+## 12. Project Structure
 
 ```
 src/
@@ -469,7 +611,7 @@ src/
 
 ---
 
-## 12. Changes from v1
+## 13. Changes from v1
 
 | Issue | v1 Problem | v2 Fix |
 |-------|-----------|--------|

@@ -27,6 +27,7 @@
     // Build & DX
     "skipLibCheck": true,
     "sourceMap": true,
+    "declaration": true,
     "declarationMap": true,
 
     // Effect Language Service
