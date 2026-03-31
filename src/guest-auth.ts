@@ -54,54 +54,58 @@ function createGuestAuthContextLayer() {
         yield* Ref.set(authenticatedAtRef, Option.none<number>());
       });
 
-      const activate = Effect.fn("GuestAuth.activate")(function* () {
-        const request = endpointRegistry.guestActivate(config.urls.guestActivate);
-        const cookieHeader = yield* cookies.getCookieHeader;
-        const csrfToken = yield* cookies.get("ct0");
-        const headers = buildBaseHeaders({
-          config,
-          request,
-          ...(cookieHeader ? { cookieHeader } : {}),
-          ...(csrfToken ? { csrfToken } : {}),
-        });
+      const activate = Effect.fn("GuestAuth.activate")(() =>
+        Effect.gen(function* () {
+          const request = endpointRegistry.guestActivate(config.urls.guestActivate);
+          const cookieHeader = yield* cookies.getCookieHeader;
+          const csrfToken = yield* cookies.get("ct0");
+          const headers = buildBaseHeaders({
+            config,
+            request,
+            ...(cookieHeader ? { cookieHeader } : {}),
+            ...(csrfToken ? { csrfToken } : {}),
+          });
 
-        const response = yield* http.execute(prepareApiRequest(request, headers));
+          const response = yield* http.execute(prepareApiRequest(request, headers));
 
-        yield* cookies.applySetCookies(response.cookies);
+          yield* cookies.applySetCookies(response.cookies);
 
-        const guestToken =
-          response.body &&
-          typeof response.body === "object" &&
-          "guest_token" in response.body &&
-          typeof response.body.guest_token === "string"
-            ? response.body.guest_token
-            : yield* invalidGuestActivationPayload(
-                "Guest activation did not return a guest_token string.",
-              );
+          const guestToken =
+            response.body &&
+            typeof response.body === "object" &&
+            "guest_token" in response.body &&
+            typeof response.body.guest_token === "string"
+              ? response.body.guest_token
+              : yield* invalidGuestActivationPayload(
+                  "Guest activation did not return a guest_token string.",
+                );
 
-        const now = yield* Clock.currentTimeMillis;
-        yield* cookies.put("gt", guestToken);
-        yield* Ref.set(tokenRef, Option.some(guestToken));
-        yield* Ref.set(authenticatedAtRef, Option.some(now));
+          const now = yield* Clock.currentTimeMillis;
+          yield* cookies.put("gt", guestToken);
+          yield* Ref.set(tokenRef, Option.some(guestToken));
+          yield* Ref.set(authenticatedAtRef, Option.some(now));
 
-        return guestToken;
-      });
+          return guestToken;
+        }).pipe(Effect.withSpan("GuestAuth.activate")),
+      );
 
-      const currentToken = Effect.fn("GuestAuth.currentToken")(function* () {
-        const existingToken = yield* Ref.get(tokenRef);
-        const authenticatedAt = yield* Ref.get(authenticatedAtRef);
-        const now = yield* Clock.currentTimeMillis;
+      const currentToken = Effect.fn("GuestAuth.currentToken")(() =>
+        Effect.gen(function* () {
+          const existingToken = yield* Ref.get(tokenRef);
+          const authenticatedAt = yield* Ref.get(authenticatedAtRef);
+          const now = yield* Clock.currentTimeMillis;
 
-        if (
-          Option.isSome(existingToken) &&
-          Option.isSome(authenticatedAt) &&
-          now - authenticatedAt.value < Duration.toMillis(config.guestTokenTtl)
-        ) {
-          return existingToken.value;
-        }
+          if (
+            Option.isSome(existingToken) &&
+            Option.isSome(authenticatedAt) &&
+            now - authenticatedAt.value < Duration.toMillis(config.guestTokenTtl)
+          ) {
+            return existingToken.value;
+          }
 
-        return yield* activate();
-      });
+          return yield* activate();
+        }).pipe(Effect.withSpan("GuestAuth.currentToken")),
+      );
 
       const snapshot = Effect.gen(function* () {
         const token = yield* Ref.get(tokenRef);

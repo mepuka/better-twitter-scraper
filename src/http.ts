@@ -20,6 +20,11 @@ import {
   TransportError,
 } from "./errors";
 import {
+  transportMetadataLayer,
+  transportLogAnnotations,
+  type TransportName,
+} from "./observability";
+import {
   httpClientRequestUrl,
   httpRequestKey,
   type PreparedApiRequest,
@@ -374,13 +379,13 @@ export class TwitterHttpClient extends ServiceMap.Service<
   }
 >()("@better-twitter-scraper/TwitterHttpClient") {
   static get fetchLayer() {
-    return makeTwitterHttpClientLayer().pipe(
+    return makeTwitterHttpClientLayer("fetch").pipe(
       Layer.provideMerge(FetchHttpClient.layer),
     );
   }
 
   static get cycleTlsLayer() {
-    return makeTwitterHttpClientLayer().pipe(
+    return makeTwitterHttpClientLayer("cycleTls").pipe(
       Layer.provideMerge(
         FetchHttpClient.layer.pipe(Layer.provideMerge(cycleTlsFetchLayer)),
       ),
@@ -431,20 +436,28 @@ export class TwitterHttpClient extends ServiceMap.Service<
       }),
     );
 
-    return makeTwitterHttpClientLayer().pipe(Layer.provideMerge(rawLayer));
+    return makeTwitterHttpClientLayer("scripted").pipe(
+      Layer.provideMerge(rawLayer),
+    );
   }
 }
 
-function makeTwitterHttpClientLayer() {
-  return Layer.effect(
-    TwitterHttpClient,
-    Effect.gen(function* () {
-      const http = yield* HttpClient.HttpClient;
+function makeTwitterHttpClientLayer(transport: TransportName) {
+  return Layer.mergeAll(
+    transportMetadataLayer(transport),
+    Layer.effect(
+      TwitterHttpClient,
+      Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
 
-      return {
-        execute: <A>(request: PreparedApiRequest<A>) =>
-          executePrepared(http, request),
-      };
-    }),
+        return {
+          execute: <A>(request: PreparedApiRequest<A>) =>
+            executePrepared(http, request).pipe(
+              Effect.annotateLogs(transportLogAnnotations(transport)),
+              Effect.withSpan("TwitterHttpClient.execute"),
+            ),
+        };
+      }),
+    ),
   );
 }

@@ -12,6 +12,7 @@ import {
 } from "../index";
 import { endpointRegistry } from "../src/endpoints";
 import type { HttpScript } from "../src/http";
+import { ObservabilityCapture } from "../src/observability-capture";
 import { httpRequestKey } from "../src/request";
 import { RequestAuth } from "../src/request-auth";
 import * as WebCrypto from "../src/web-crypto";
@@ -25,6 +26,15 @@ const restoredSessionCookies = [
   "ct0=csrf-token; Path=/; Domain=x.com",
   "auth_token=session-token; Path=/; Domain=x.com; HttpOnly",
 ] as const;
+
+const matchingLogs = (
+  logs: readonly {
+    readonly annotations: Readonly<Record<string, unknown>>;
+    readonly level: string;
+    readonly message: unknown;
+  }[],
+  message: string,
+) => logs.filter((entry) => entry.message === message);
 
 const userAuthTestLayer = (
   initialCookies: Readonly<Record<string, string>> = {},
@@ -402,6 +412,73 @@ describe("Slice 3B authenticated limiter behavior", () => {
         Effect.provide(
           Layer.mergeAll(
             TestClock.layer(),
+            searchTestLayer({
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]:
+                [
+                  {
+                    status: 429,
+                    bodyText: "too many searches",
+                  },
+                  {
+                    status: 200,
+                    json: searchProfilesPageOneFixture,
+                  },
+                ],
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+});
+
+describe("Slice 3C authenticated observability", () => {
+  it("annotates authenticated 429 retry logs with request context", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const capture = yield* ObservabilityCapture;
+          const search = yield* TwitterSearch;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          const searchFiber = yield* Stream.runCollect(
+            search.searchProfiles("Twitter", { limit: 2 }),
+          ).pipe(Effect.forkScoped);
+
+          yield* TestClock.adjust("999 millis");
+          expect(searchFiber.pollUnsafe()).toBeUndefined();
+
+          yield* TestClock.adjust("1 millis");
+          const profiles = yield* Fiber.join(searchFiber);
+
+          expect(profiles.map((profile) => profile.username)).toEqual([
+            "twitterdev",
+            "twitterapi",
+          ]);
+
+          const logs = yield* capture.logs;
+          const retryLogs = matchingLogs(logs, "429 retry scheduled");
+
+          expect(retryLogs).toHaveLength(1);
+          expect(retryLogs[0]?.level).toBe("DEBUG");
+          expect(retryLogs[0]?.annotations).toMatchObject({
+            endpoint_id: "SearchProfiles",
+            endpoint_family: "graphql",
+            rate_limit_bucket: "searchProfiles",
+            auth_mode: "user",
+            bearer_token: "secondary",
+            transport: "scripted",
+            retry_attempt: 0,
+            status: 429,
+          });
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            TestClock.layer(),
+            ObservabilityCapture.layer(),
             searchTestLayer({
               [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]:
                 [

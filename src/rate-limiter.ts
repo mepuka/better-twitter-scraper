@@ -1,6 +1,7 @@
 import { Clock, Duration, Effect, Layer, Ref, ServiceMap } from "effect";
 
 import { RateLimitError } from "./errors";
+import { logDebugDecision } from "./observability";
 import type { RateLimitBucket } from "./request";
 
 interface BucketState {
@@ -124,6 +125,10 @@ export class RateLimiter extends ServiceMap.Service<
           const waitMs = bucketState.blockedUntil - now;
 
           if (waitMs > 0) {
+            yield* logDebugDecision("Rate limiter wait begins", {
+              rate_limit_bucket: bucket,
+              wait_ms: waitMs,
+            });
             yield* Effect.sleep(Duration.millis(waitMs));
           }
         });

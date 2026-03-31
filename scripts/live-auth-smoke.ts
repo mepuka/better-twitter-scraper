@@ -9,6 +9,7 @@ import {
   UserAuth,
 } from "../index";
 import { loadSerializedCookies } from "../src/live-auth-cookies";
+import { ObservabilityCapture } from "../src/observability-capture";
 
 const liveSearchLayer = TwitterSearch.layer.pipe(
   Layer.provideMerge(ScraperStrategy.standardLayer),
@@ -34,6 +35,7 @@ const main = async () => {
   const result = await Effect.runPromise(
     Effect.gen(function* () {
       const auth = yield* UserAuth;
+      const capture = yield* ObservabilityCapture;
       const search = yield* TwitterSearch;
 
       yield* auth.restoreCookies(cookies);
@@ -53,8 +55,19 @@ const main = async () => {
         throw new Error("Authenticated profile search returned no profiles.");
       }
 
-      return secondProfiles.map((profile) => profile.username);
-    }).pipe(Effect.provide(liveSearchLayer)),
+      const spans = yield* capture.spans;
+
+      return {
+        observability: {
+          spanNames: [...new Set(spans.map((span) => span.name))].sort(),
+        },
+        usernames: secondProfiles.map((profile) => profile.username),
+      };
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(liveSearchLayer, ObservabilityCapture.layer()),
+      ),
+    ),
   );
 
   console.log(JSON.stringify(result));

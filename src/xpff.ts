@@ -78,18 +78,20 @@ export class TwitterXpff extends ServiceMap.Service<
     Effect.gen(function* () {
       const cookies = yield* CookieManager;
 
-      const headerFor = Effect.fn("TwitterXpff.headerFor")(function* () {
-        const guestId = yield* cookies.get("guest_id");
+      const headerFor = Effect.fn("TwitterXpff.headerFor")(() =>
+        Effect.gen(function* () {
+          const guestId = yield* cookies.get("guest_id");
 
-        if (!guestId) {
-          return {};
-        }
+          if (!guestId) {
+            return {};
+          }
 
-        const header = yield* generateXpffHeader(guestId);
-        return {
-          "x-xp-forwarded-for": header,
-        } as const;
-      });
+          const header = yield* generateXpffHeader(guestId);
+          return {
+            "x-xp-forwarded-for": header,
+          } as const;
+        }).pipe(Effect.withSpan("TwitterXpff.headerFor")),
+      );
 
       return { headerFor };
     }),

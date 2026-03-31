@@ -229,35 +229,36 @@ export class TwitterTransactionId extends ServiceMap.Service<
         return document;
       });
 
-      const headerFor = Effect.fn("TwitterTransactionId.headerFor")(function* (
-        request: {
+      const headerFor = Effect.fn("TwitterTransactionId.headerFor")(
+        (request: {
           readonly method: string;
           readonly url: string;
-        },
-      ) {
-        const document = yield* cachedDocument();
-        const url = new URL(request.url);
+        }) =>
+          Effect.gen(function* () {
+            const document = yield* cachedDocument();
+            const url = new URL(request.url);
 
-        const transactionId = yield* Effect.tryPromise({
-          try: async () => {
-            const transaction = await ClientTransaction.create(document);
-            return transaction.generateTransactionId(
-              request.method.toUpperCase(),
-              url.pathname,
-            );
-          },
-          catch: (error) =>
-            transactionDocumentError(
-              error instanceof Error
-                ? error.message
-                : "Failed to generate X transaction ID.",
-            ),
-        });
+            const transactionId = yield* Effect.tryPromise({
+              try: async () => {
+                const transaction = await ClientTransaction.create(document);
+                return transaction.generateTransactionId(
+                  request.method.toUpperCase(),
+                  url.pathname,
+                );
+              },
+              catch: (error) =>
+                transactionDocumentError(
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to generate X transaction ID.",
+                ),
+            });
 
-        return {
-          "x-client-transaction-id": transactionId,
-        } as const;
-      });
+            return {
+              "x-client-transaction-id": transactionId,
+            } as const;
+          }).pipe(Effect.withSpan("TwitterTransactionId.headerFor")),
+      );
 
       return { headerFor };
     }),

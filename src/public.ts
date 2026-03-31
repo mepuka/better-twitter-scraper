@@ -33,28 +33,28 @@ export class TwitterPublic extends ServiceMap.Service<
       const config = yield* TwitterConfig;
       const strategy = yield* ScraperStrategy;
 
-      const getProfile = Effect.fn("TwitterPublic.getProfile")(function* (
-        username: string,
-      ) {
-        return yield* (strategy.execute(
-          endpointRegistry.userByScreenName(username),
-        ) as Effect.Effect<Profile, StrategyError>);
-      });
-
-      const fetchTweetsPage = Effect.fn("TwitterPublic.fetchTweetsPage")(function* (
-        userId: string,
-        count: number,
-        cursor?: string,
-      ) {
-        return yield* (strategy.execute(
-          endpointRegistry.userTweets(
-            userId,
-            Math.min(count, config.timeline.maxPageSize),
-            config.timeline.includePromotedContent,
-            cursor,
+      const getProfile = Effect.fn("TwitterPublic.getProfile")(
+        (username: string) =>
+          (strategy.execute(
+            endpointRegistry.userByScreenName(username),
+          ) as Effect.Effect<Profile, StrategyError>).pipe(
+            Effect.withSpan("TwitterPublic.getProfile"),
           ),
-        ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>);
-      });
+      );
+
+      const fetchTweetsPage = Effect.fn("TwitterPublic.fetchTweetsPage")(
+        (userId: string, count: number, cursor?: string) =>
+          (strategy.execute(
+            endpointRegistry.userTweets(
+              userId,
+              Math.min(count, config.timeline.maxPageSize),
+              config.timeline.includePromotedContent,
+              cursor,
+            ),
+          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>).pipe(
+            Effect.withSpan("TwitterPublic.fetchTweetsPage"),
+          ),
+      );
 
       const getTweets = (username: string, options: GetTweetsOptions = {}) =>
         Stream.unwrap(

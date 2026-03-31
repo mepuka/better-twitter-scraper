@@ -8,6 +8,7 @@ import {
   TwitterHttpClient,
   TwitterPublic,
 } from "../index";
+import { ObservabilityCapture } from "../src/observability-capture";
 
 const livePublicLayer = TwitterPublic.layer.pipe(
   Layer.provideMerge(ScraperStrategy.standardLayer),
@@ -20,26 +21,31 @@ const livePublicLayer = TwitterPublic.layer.pipe(
 const main = async () => {
   const result = await Effect.runPromise(
     Effect.gen(function* () {
+      const capture = yield* ObservabilityCapture;
       const publicApi = yield* TwitterPublic;
       const profile = yield* publicApi.getProfile("nomadic_ua");
-      const repeatedProfile = yield* publicApi.getProfile("nomadic_ua");
       const tweets = yield* Stream.runCollect(
         publicApi.getTweets("XDevelopers", { limit: 3 }),
       );
+      const spans = yield* capture.spans;
 
       return {
+        observability: {
+          spanNames: [...new Set(spans.map((span) => span.name))].sort(),
+        },
         profile: {
           userId: profile.userId,
           username: profile.username,
-        },
-        repeatedProfile: {
-          userId: repeatedProfile.userId,
         },
         tweets: tweets.map((tweet) => ({
           id: tweet.id,
         })),
       };
-    }).pipe(Effect.provide(livePublicLayer)),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(livePublicLayer, ObservabilityCapture.layer()),
+      ),
+    ),
   );
 
   console.log(JSON.stringify(result));

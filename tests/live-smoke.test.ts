@@ -43,6 +43,9 @@ describe("Live guest smoke", () => {
       });
 
       const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly spanNames: readonly string[];
+        };
         readonly profile: {
           readonly userId?: string;
           readonly username?: string;
@@ -51,6 +54,13 @@ describe("Live guest smoke", () => {
 
       expect(payload.profile.userId).toBeTruthy();
       expect(payload.profile.username?.toLowerCase()).toBe("nomadic_ua");
+      expect(payload.observability.spanNames).toEqual(
+        expect.arrayContaining([
+          "ScraperStrategy.execute",
+          "TwitterHttpClient.execute",
+          "TwitterPublic.getProfile",
+        ]),
+      );
     }, 30_000);
 
     it("loads a public tweet timeline anonymously", async () => {
@@ -72,6 +82,9 @@ describe("Live guest smoke", () => {
       });
 
       const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly spanNames: readonly string[];
+        };
         readonly tweets: ReadonlyArray<{
           readonly id?: string;
         }>;
@@ -79,6 +92,13 @@ describe("Live guest smoke", () => {
 
       expect(payload.tweets.length).toBeGreaterThan(0);
       expect(payload.tweets[0]?.id).toBeTruthy();
+      expect(payload.observability.spanNames).toEqual(
+        expect.arrayContaining([
+          "ScraperStrategy.execute",
+          "TwitterHttpClient.execute",
+          "TwitterPublic.fetchTweetsPage",
+        ]),
+      );
     }, 30_000);
   } else {
     it.skip("loads a public profile anonymously", () => {});
@@ -122,9 +142,22 @@ describe("Live authenticated smoke", () => {
         stderr: "",
       });
 
-      const usernames = JSON.parse(stdout) as string[];
-      expect(usernames.length).toBeGreaterThan(0);
-      expect(usernames[0]).toBeTruthy();
+      const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly spanNames: readonly string[];
+        };
+        readonly usernames: readonly string[];
+      };
+      expect(payload.usernames.length).toBeGreaterThan(0);
+      expect(payload.usernames[0]).toBeTruthy();
+      expect(payload.observability.spanNames).toEqual(
+        expect.arrayContaining([
+          "ScraperStrategy.execute",
+          "TwitterHttpClient.execute",
+          "TwitterSearch.fetchProfilesPage",
+          "TwitterTransactionId.headerFor",
+        ]),
+      );
     }, 30_000);
   } else {
     it.skip("restores a signed-in session from cookies", () => {});

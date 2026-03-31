@@ -12,6 +12,7 @@ import {
 } from "../index";
 import { endpointRegistry } from "../src/endpoints";
 import type { HttpScript } from "../src/http";
+import { ObservabilityCapture } from "../src/observability-capture";
 import { httpRequestKey, type ApiRequest } from "../src/request";
 import {
   profileFixture,
@@ -58,6 +59,15 @@ const makeDefaultBearerRequest = (): ApiRequest<string> => ({
     return value;
   },
 });
+
+const matchingLogs = (
+  logs: readonly {
+    readonly annotations: Readonly<Record<string, unknown>>;
+    readonly level: string;
+    readonly message: unknown;
+  }[],
+  message: string,
+) => logs.filter((entry) => entry.message === message);
 
 describe("Slice 1 request registry", () => {
   it("builds a typed UserByScreenName request with the right metadata", () => {
@@ -451,6 +461,159 @@ describe("Slice 3B guest limiter behavior", () => {
                     json: profileFixture,
                   },
                 ],
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+});
+
+describe("Slice 3C guest observability", () => {
+  it("annotates guest warning-header invalidation logs with request context", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const capture = yield* ObservabilityCapture;
+        const strategy = yield* ScraperStrategy;
+
+        expect(yield* strategy.execute(makeDefaultBearerRequest())).toBe("first");
+
+        const logs = yield* capture.logs;
+        const invalidationLogs = matchingLogs(
+          logs,
+          "Guest token invalidated from warning header",
+        );
+
+        expect(invalidationLogs).toHaveLength(1);
+        expect(invalidationLogs[0]?.level).toBe("DEBUG");
+        expect(invalidationLogs[0]?.annotations).toMatchObject({
+          endpoint_id: "TestDefaultBearer",
+          endpoint_family: "graphql",
+          rate_limit_bucket: "generic",
+          auth_mode: "guest",
+          bearer_token: "default",
+          transport: "scripted",
+          retry_attempt: 0,
+          warning_header: "x-rate-limit-incoming",
+          warning_value: "0",
+        });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ObservabilityCapture.layer(),
+            strategyTestLayer({
+              [guestActivateKey]: [
+                { status: 200, json: { guest_token: "guest-1" } },
+              ],
+              [httpRequestKey(makeDefaultBearerRequest())]: [
+                {
+                  status: 200,
+                  headers: { "x-rate-limit-incoming": "0" },
+                  json: { value: "first" },
+                },
+              ],
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
+  it("emits exactly one limiter wait log with the expected bucket and delay", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const capture = yield* ObservabilityCapture;
+          const publicApi = yield* TwitterPublic;
+
+          yield* publicApi.getProfile("nomadic_ua");
+
+          const secondFiber = yield* publicApi.getProfile("nomadic_ua").pipe(
+            Effect.forkScoped,
+          );
+
+          yield* TestClock.adjust("1999 millis");
+          expect(secondFiber.pollUnsafe()).toBeUndefined();
+
+          yield* TestClock.adjust("1 millis");
+          yield* Fiber.join(secondFiber);
+
+          const logs = yield* capture.logs;
+          const waitLogs = matchingLogs(logs, "Rate limiter wait begins");
+
+          expect(waitLogs).toHaveLength(1);
+          expect(waitLogs[0]?.level).toBe("DEBUG");
+          expect(waitLogs[0]?.annotations).toMatchObject({
+            endpoint_id: "UserByScreenName",
+            endpoint_family: "graphql",
+            rate_limit_bucket: "profileLookup",
+            auth_mode: "guest",
+            bearer_token: "secondary",
+            transport: "scripted",
+            retry_attempt: 0,
+            wait_ms: 2000,
+          });
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            TestClock.layer(),
+            ObservabilityCapture.layer(),
+            publicTestLayer({
+              [httpRequestKey(endpointRegistry.userByScreenName("nomadic_ua"))]:
+                [
+                  {
+                    status: 200,
+                    headers: {
+                      "x-rate-limit-limit": "300",
+                      "x-rate-limit-remaining": "0",
+                      "x-rate-limit-reset": "2",
+                    },
+                    json: profileFixture,
+                  },
+                  {
+                    status: 200,
+                    json: profileFixture,
+                  },
+                ],
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
+  it("emits a bot-detection debug log when a guest request is classified", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const capture = yield* ObservabilityCapture;
+        const publicApi = yield* TwitterPublic;
+
+        const result = yield* Effect.exit(publicApi.getProfile("nomadic_ua"));
+        expect(result._tag).toBe("Failure");
+
+        const logs = yield* capture.logs;
+        const botLogs = matchingLogs(logs, "Bot detection classified");
+
+        expect(botLogs).toHaveLength(1);
+        expect(botLogs[0]?.annotations).toMatchObject({
+          endpoint_id: "UserByScreenName",
+          endpoint_family: "graphql",
+          rate_limit_bucket: "profileLookup",
+          auth_mode: "guest",
+          bearer_token: "secondary",
+          transport: "scripted",
+          retry_attempt: 0,
+          status: 399,
+          reason: "status_399",
+        });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ObservabilityCapture.layer(),
+            publicTestLayer({
+              [httpRequestKey(endpointRegistry.userByScreenName("nomadic_ua"))]:
+                [{ status: 399, bodyText: "fingerprint rejected" }],
             }),
           ),
         ),

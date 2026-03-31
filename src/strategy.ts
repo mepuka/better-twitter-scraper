@@ -18,6 +18,12 @@ import {
   decodeParsedBody,
 } from "./http-client-utils";
 import { TwitterHttpClient } from "./http";
+import {
+  logDebugDecision,
+  requestLogAnnotations,
+  TransportMetadata,
+  type TransportName,
+} from "./observability";
 import { RateLimiter } from "./rate-limiter";
 import { RequestAuth, type RequestAuthError } from "./request-auth";
 import {
@@ -83,6 +89,7 @@ export const createStrategyExecute = (
   cookies: StrategyCookies,
   http: StrategyTransport,
   rateLimiter: StrategyRateLimiter,
+  transport: TransportName,
 ) => {
   const executeOnce = <A>(
     request: ApiRequest<A>,
@@ -104,6 +111,10 @@ export const createStrategyExecute = (
         request.authRequirement === "guest" &&
         request.bearerToken === "default"
       ) {
+        yield* logDebugDecision("Guest token invalidated from warning header", {
+          warning_header: "x-rate-limit-incoming",
+          warning_value: "0",
+        });
         yield* auth.invalidate;
       }
 
@@ -121,8 +132,11 @@ export const createStrategyExecute = (
           request.bearerToken === "default" &&
           (error.status === 401 || error.status === 403)
         ) {
-          return auth.invalidate.pipe(
-            Effect.flatMap(() => executeWithRetry(request, attempt + 1)),
+          return logDebugDecision("Guest auth refresh scheduled after 401/403", {
+            status: error.status,
+          }).pipe(
+            Effect.andThen(auth.invalidate),
+            Effect.andThen(() => executeWithRetry(request, attempt + 1)),
           );
         }
 
@@ -130,6 +144,16 @@ export const createStrategyExecute = (
 
         if (classified._tag === "RateLimitError") {
           return rateLimiter.noteRateLimit(classified).pipe(
+            Effect.tap(() =>
+              attempt === 0
+                ? logDebugDecision("429 retry scheduled", {
+                    status: classified.status,
+                    ...(classified.reset !== undefined
+                      ? { reset_at: classified.reset }
+                      : {}),
+                  })
+                : Effect.void,
+            ),
             Effect.flatMap(() =>
               attempt === 0
                 ? executeWithRetry(request, attempt + 1)
@@ -138,9 +162,22 @@ export const createStrategyExecute = (
           );
         }
 
+        if (classified._tag === "BotDetectionError") {
+          return logDebugDecision("Bot detection classified", {
+            status: classified.status,
+            reason: classified.reason,
+          }).pipe(Effect.andThen(() => Effect.fail(classified)));
+        }
+
         return Effect.fail(classified);
       }),
-      Effect.withSpan(`ScraperStrategy.execute.${request.endpointId}`),
+      Effect.annotateLogs(
+        requestLogAnnotations(request, {
+          retryAttempt: attempt,
+          transport,
+        }),
+      ),
+      Effect.withSpan("ScraperStrategy.execute"),
     );
 
   return <A>(request: ApiRequest<A>): Effect.Effect<A, StrategyError> =>
@@ -162,10 +199,17 @@ export class ScraperStrategy extends ServiceMap.Service<
         const auth = yield* RequestAuth;
         const cookies = yield* CookieManager;
         const http = yield* TwitterHttpClient;
+        const transport = yield* TransportMetadata;
         const rateLimiter = yield* RateLimiter;
 
         return {
-          execute: createStrategyExecute(auth, cookies, http, rateLimiter),
+          execute: createStrategyExecute(
+            auth,
+            cookies,
+            http,
+            rateLimiter,
+            transport.name,
+          ),
         };
       }),
     ).pipe(Layer.provideMerge(RateLimiter.liveLayer));

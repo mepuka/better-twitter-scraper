@@ -32,19 +32,18 @@ export class TwitterSearch extends ServiceMap.Service<
       const auth = yield* UserAuth;
       const strategy = yield* ScraperStrategy;
 
-      const fetchProfilesPage = Effect.fn("TwitterSearch.fetchProfilesPage")(function* (
-        query: string,
-        count: number,
-        cursor?: string,
-      ) {
-        return yield* (strategy.execute(
-          endpointRegistry.searchProfiles(
-            query,
-            Math.min(count, config.search.maxPageSize),
-            cursor,
+      const fetchProfilesPage = Effect.fn("TwitterSearch.fetchProfilesPage")(
+        (query: string, count: number, cursor?: string) =>
+          (strategy.execute(
+            endpointRegistry.searchProfiles(
+              query,
+              Math.min(count, config.search.maxPageSize),
+              cursor,
+            ),
+          ) as Effect.Effect<TimelinePage<Profile>, StrategyError>).pipe(
+            Effect.withSpan("TwitterSearch.fetchProfilesPage"),
           ),
-        ) as Effect.Effect<TimelinePage<Profile>, StrategyError>);
-      });
+      );
 
       const searchProfiles = (
         query: string,
