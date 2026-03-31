@@ -154,6 +154,47 @@ interface UserTweetsResponse {
   };
 }
 
+interface SearchUserResultRaw {
+  readonly rest_id?: string;
+  readonly is_blue_verified?: boolean;
+  readonly legacy?: LegacyUserRaw;
+  readonly core?: CoreUserRaw;
+}
+
+interface SearchEntryItemContentRaw {
+  readonly userDisplayType?: string;
+  readonly user_results?: {
+    readonly result?: SearchUserResultRaw;
+  };
+}
+
+interface SearchEntryRaw {
+  readonly entryId: string;
+  readonly content?: {
+    readonly cursorType?: string;
+    readonly value?: string;
+    readonly itemContent?: SearchEntryItemContentRaw;
+  };
+}
+
+interface SearchInstructionRaw {
+  readonly type?: string;
+  readonly entries?: ReadonlyArray<SearchEntryRaw>;
+  readonly entry?: SearchEntryRaw;
+}
+
+interface SearchTimelineResponse {
+  readonly data?: {
+    readonly search_by_raw_query?: {
+      readonly search_timeline?: {
+        readonly timeline?: {
+          readonly instructions?: ReadonlyArray<SearchInstructionRaw>;
+        };
+      };
+    };
+  };
+}
+
 const getAvatarOriginalSizeUrl = (avatarUrl: string | undefined) =>
   avatarUrl ? avatarUrl.replace("_normal", "") : undefined;
 
@@ -275,38 +316,32 @@ const parseTweet = (
   } as Tweet;
 };
 
-export const parseProfileResponse = (
-  body: unknown,
-  username: string,
-): Profile => {
-  const response = body as UserByScreenNameResponse;
-  const user = response.data?.user?.result;
-  if (!user) {
-    throw new ProfileNotFoundError({ username });
-  }
-
-  if (user.__typename === "UserUnavailable" && user.reason === "Suspended") {
-    throw new ProfileNotFoundError({ username });
-  }
-
-  const legacy = user.legacy;
+const parseUserProfile = (input: {
+  readonly legacy: LegacyUserRaw | undefined;
+  readonly restId: string | undefined;
+  readonly isBlueVerified: boolean | undefined;
+  readonly core: CoreUserRaw | undefined;
+  readonly avatarUrl?: string | undefined;
+  readonly location?: string | undefined;
+}) => {
+  const legacy = input.legacy;
   if (!legacy) {
-    throw new ProfileNotFoundError({ username });
+    return undefined;
   }
 
-  const userId = user.rest_id ?? legacy.id_str;
-  const screenName = legacy.screen_name ?? user.core?.screen_name;
+  const userId = input.restId ?? legacy.id_str;
+  const screenName = legacy.screen_name ?? input.core?.screen_name;
   if (!userId || !screenName) {
-    throw new ProfileNotFoundError({ username });
+    return undefined;
   }
 
   const joined =
-    legacy.created_at ?? user.core?.created_at
-      ? new Date(Date.parse(legacy.created_at ?? user.core?.created_at ?? ""))
+    legacy.created_at ?? input.core?.created_at
+      ? new Date(Date.parse(legacy.created_at ?? input.core?.created_at ?? ""))
       : undefined;
 
   const avatar = getAvatarOriginalSizeUrl(
-    legacy.profile_image_url_https ?? user.avatar?.image_url,
+    legacy.profile_image_url_https ?? input.avatarUrl,
   );
 
   return {
@@ -325,7 +360,7 @@ export const parseProfileResponse = (
       : {}),
     isPrivate: legacy.protected ?? false,
     ...(legacy.verified !== undefined ? { isVerified: legacy.verified } : {}),
-    isBlueVerified: user.is_blue_verified ?? false,
+    isBlueVerified: input.isBlueVerified ?? false,
     ...(joined && !Number.isNaN(joined.valueOf()) ? { joined } : {}),
     ...(legacy.favourites_count !== undefined
       ? { likesCount: legacy.favourites_count }
@@ -333,10 +368,12 @@ export const parseProfileResponse = (
     ...(legacy.listed_count !== undefined
       ? { listedCount: legacy.listed_count }
       : {}),
-    ...(legacy.location ?? user.location?.location
-      ? { location: legacy.location ?? user.location?.location }
+    ...(legacy.location ?? input.location
+      ? { location: legacy.location ?? input.location }
       : {}),
-    ...(legacy.name ?? user.core?.name ? { name: legacy.name ?? user.core?.name } : {}),
+    ...(legacy.name ?? input.core?.name
+      ? { name: legacy.name ?? input.core?.name }
+      : {}),
     pinnedTweetIds: legacy.pinned_tweet_ids_str ?? [],
     url: `https://x.com/${screenName}`,
     userId,
@@ -346,6 +383,99 @@ export const parseProfileResponse = (
       : {}),
     ...(legacy.can_dm !== undefined ? { canDm: legacy.can_dm } : {}),
   } as Profile;
+};
+
+export const parseProfileResponse = (
+  body: unknown,
+  username: string,
+): Profile => {
+  const response = body as UserByScreenNameResponse;
+  const user = response.data?.user?.result;
+  if (!user) {
+    throw new ProfileNotFoundError({ username });
+  }
+
+  if (user.__typename === "UserUnavailable" && user.reason === "Suspended") {
+    throw new ProfileNotFoundError({ username });
+  }
+
+  const profile = parseUserProfile({
+    legacy: user.legacy,
+    restId: user.rest_id,
+    isBlueVerified: user.is_blue_verified,
+    core: user.core,
+    avatarUrl: user.avatar?.image_url,
+    location: user.location?.location,
+  });
+  if (!profile) {
+    throw new ProfileNotFoundError({ username });
+  }
+
+  return profile;
+};
+
+export const parseSearchProfilesResponse = (
+  body: unknown,
+): TimelinePage<Profile> => {
+  const response = body as SearchTimelineResponse;
+  const instructions =
+    response.data?.search_by_raw_query?.search_timeline?.timeline?.instructions ??
+    [];
+
+  let nextCursor: string | undefined;
+  let previousCursor: string | undefined;
+  const items: Profile[] = [];
+
+  for (const instruction of instructions) {
+    if (
+      instruction.type &&
+      instruction.type !== "TimelineAddEntries" &&
+      instruction.type !== "TimelineReplaceEntry"
+    ) {
+      continue;
+    }
+
+    const entries = [
+      ...(instruction.entries ?? []),
+      ...(instruction.entry ? [instruction.entry] : []),
+    ];
+
+    for (const entry of entries) {
+      if (entry.content?.cursorType === "Bottom") {
+        nextCursor = entry.content.value;
+        continue;
+      }
+
+      if (entry.content?.cursorType === "Top") {
+        previousCursor = entry.content.value;
+        continue;
+      }
+
+      const itemContent = entry.content?.itemContent;
+      if (itemContent?.userDisplayType !== "User") {
+        continue;
+      }
+
+      const user = itemContent.user_results?.result;
+      const profile = parseUserProfile({
+        legacy: user?.legacy,
+        restId: user?.rest_id,
+        isBlueVerified: user?.is_blue_verified,
+        core: user?.core,
+      });
+
+      if (profile) {
+        items.push(profile);
+      }
+    }
+  }
+
+  return {
+    items,
+    ...(nextCursor ? { nextCursor } : {}),
+    ...(previousCursor ? { previousCursor } : {}),
+    status: nextCursor ? "has_more" : "at_end",
+  } as TimelinePage<Profile>;
 };
 
 export const parseTimelinePageResponse = (body: unknown): TimelinePage<Tweet> => {

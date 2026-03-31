@@ -2,12 +2,17 @@ import { Option } from "effect";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
 export type EndpointFamily = "graphql";
-export type AuthRequirement = "guest";
+export type AuthRequirement = "guest" | "user";
 export type BearerTokenName = "default" | "secondary";
-export type EndpointId = "UserByScreenName" | "UserTweets" | (string & {});
+export type EndpointId =
+  | "UserByScreenName"
+  | "UserTweets"
+  | "SearchProfiles"
+  | (string & {});
 export type RateLimitBucket =
   | "profileLookup"
   | "userTweets"
+  | "searchProfiles"
   | "guestActivation"
   | (string & {});
 

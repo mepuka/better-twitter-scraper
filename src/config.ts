@@ -1,5 +1,12 @@
 import { Layer, ServiceMap } from "effect";
 
+import {
+  CHROME_SEC_CH_UA,
+  CHROME_SEC_CH_UA_MOBILE,
+  CHROME_SEC_CH_UA_PLATFORM,
+  CHROME_USER_AGENT,
+} from "./chrome-fingerprint";
+
 export interface TwitterConfigShape {
   readonly bearerTokens: {
     readonly default: string;
@@ -17,6 +24,10 @@ export interface TwitterConfigShape {
     readonly defaultLimit: number;
     readonly maxPageSize: number;
     readonly includePromotedContent: boolean;
+  };
+  readonly search: {
+    readonly defaultLimit: number;
+    readonly maxPageSize: number;
   };
 }
 
@@ -36,14 +47,12 @@ export class TwitterConfig extends ServiceMap.Service<
     },
     requestProfile: {
       commonHeaders: {
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+        "user-agent": CHROME_USER_AGENT,
         accept: "*/*",
         "accept-language": "en-US,en;q=0.9",
-        "sec-ch-ua":
-          "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Google Chrome\";v=\"144\"",
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": "\"Windows\"",
+        "sec-ch-ua": CHROME_SEC_CH_UA,
+        "sec-ch-ua-mobile": CHROME_SEC_CH_UA_MOBILE,
+        "sec-ch-ua-platform": CHROME_SEC_CH_UA_PLATFORM,
         referer: "https://x.com/",
         origin: "https://x.com",
         "sec-fetch-site": "same-site",
@@ -61,6 +70,10 @@ export class TwitterConfig extends ServiceMap.Service<
       defaultLimit: 20,
       maxPageSize: 40,
       includePromotedContent: false,
+    },
+    search: {
+      defaultLimit: 20,
+      maxPageSize: 50,
     },
   } satisfies TwitterConfigShape);
 }

@@ -203,3 +203,107 @@ export const tweetsPageTwoFixture = {
     },
   },
 } as const;
+
+const searchProfileEntry = (profile: {
+  readonly id: string;
+  readonly username: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly website?: string;
+}) => ({
+  entryId: `user-${profile.id}`,
+  content: {
+    itemContent: {
+      userDisplayType: "User",
+      user_results: {
+        result: {
+          rest_id: profile.id,
+          is_blue_verified: false,
+          legacy: {
+            id_str: profile.id,
+            screen_name: profile.username,
+            name: profile.name,
+            description: profile.description,
+            entities: {
+              url: {
+                urls: profile.website
+                  ? [{ expanded_url: profile.website }]
+                  : [],
+              },
+            },
+            followers_count: 10,
+            friends_count: 3,
+            media_count: 1,
+            statuses_count: 5,
+            favourites_count: 2,
+            listed_count: 0,
+            profile_image_url_https:
+              "https://pbs.twimg.com/profile_images/example_normal.jpeg",
+            protected: false,
+            can_dm: true,
+          },
+        },
+      },
+    },
+  },
+});
+
+export const searchProfilesPageOneFixture = {
+  data: {
+    search_by_raw_query: {
+      search_timeline: {
+        timeline: {
+          instructions: [
+            {
+              type: "TimelineAddEntries",
+              entries: [
+                searchProfileEntry({
+                  id: "2001",
+                  username: "twitterdev",
+                  name: "Twitter Dev",
+                  description: "Developer account",
+                  website: "https://developer.x.com",
+                }),
+                searchProfileEntry({
+                  id: "2002",
+                  username: "twitterapi",
+                  name: "Twitter API",
+                }),
+                {
+                  entryId: "cursor-bottom-search-1",
+                  content: {
+                    cursorType: "Bottom",
+                    value: "search-cursor-1",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  },
+} as const;
+
+export const searchProfilesPageTwoFixture = {
+  data: {
+    search_by_raw_query: {
+      search_timeline: {
+        timeline: {
+          instructions: [
+            {
+              type: "TimelineAddEntries",
+              entries: [
+                searchProfileEntry({
+                  id: "2003",
+                  username: "twittereng",
+                  name: "Twitter Engineering",
+                }),
+              ],
+            },
+          ],
+        },
+      },
+    },
+  },
+} as const;

@@ -10,12 +10,17 @@
     "vitest": "^4.1.0"
   },
   "scripts": {
+    "cookies:extract": "bun scripts/extract-twitter-cookies.ts",
+    "smoke:auth-live": "bun scripts/live-auth-smoke.ts",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "effect": "^4.0.0-beta.35"
+    "cycletls": "^2.0.5",
+    "effect": "^4.0.0-beta.35",
+    "linkedom": "^0.18.12",
+    "x-client-transaction-id": "^0.2.0"
   }
 }

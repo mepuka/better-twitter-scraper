@@ -2,6 +2,8 @@ import { Effect, Layer, ServiceMap } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
+import type * as Cookies from "effect/unstable/http/Cookies";
+
 import { CookieManager } from "./cookies";
 import { GuestAuth } from "./guest-auth";
 import {
@@ -25,6 +27,72 @@ export type StrategyError =
   | ProfileNotFoundError
   | TransportError;
 
+export interface StrategyAuth {
+  readonly headersFor: (options: {
+    readonly family: ApiRequest<unknown>["family"];
+    readonly bearerToken: ApiRequest<unknown>["bearerToken"];
+  }) => Effect.Effect<Readonly<Record<string, string>>, StrategyError>;
+  readonly invalidate: Effect.Effect<void>;
+}
+
+export interface StrategyCookies {
+  readonly applySetCookies: (
+    setCookies: Cookies.Cookies,
+  ) => Effect.Effect<void>;
+}
+
+export type StrategyHeaderDecorator = (
+  request: ApiRequest<unknown>,
+) => Effect.Effect<Readonly<Record<string, string>>, StrategyError>;
+
+export const createStrategyExecute = (
+  auth: StrategyAuth,
+  cookies: StrategyCookies,
+  http: HttpClient.HttpClient,
+  decorateHeaders?: StrategyHeaderDecorator,
+) => {
+  const executeOnce = <A>(
+    request: ApiRequest<A>,
+  ): Effect.Effect<A, StrategyError> =>
+    Effect.gen(function* () {
+      const baseHeaders = yield* auth.headersFor({
+        family: request.family,
+        bearerToken: request.bearerToken,
+      });
+      const decoratedHeaders = decorateHeaders
+        ? yield* decorateHeaders(request)
+        : {};
+      const headers = {
+        ...baseHeaders,
+        ...decoratedHeaders,
+      };
+
+      const response = yield* http.execute(
+        request.request.pipe(HttpClientRequest.setHeaders(headers)),
+      ).pipe(Effect.mapError(mapHttpClientError));
+
+      yield* cookies.applySetCookies(response.cookies);
+
+      if (response.headers["x-rate-limit-incoming"] === "0") {
+        yield* auth.invalidate;
+      }
+
+      const okResponse = yield* ensureSuccessStatus(request.endpointId, response);
+
+      return yield* decodeJsonResponse(request, okResponse);
+    });
+
+  return (request: ApiRequest<unknown>): Effect.Effect<unknown, StrategyError> =>
+    executeOnce(request).pipe(
+      Effect.catchTag("HttpStatusError", (error) =>
+        request.bearerToken === "default" && (error.status === 401 || error.status === 403)
+          ? auth.invalidate.pipe(Effect.flatMap(() => executeOnce(request)))
+          : Effect.fail(error),
+      ),
+      Effect.withSpan(`ScraperStrategy.execute.${request.endpointId}`),
+    );
+};
+
 export class ScraperStrategy extends ServiceMap.Service<
   ScraperStrategy,
   {
@@ -39,44 +107,7 @@ export class ScraperStrategy extends ServiceMap.Service<
       const auth = yield* GuestAuth;
       const cookies = yield* CookieManager;
       const http = yield* HttpClient.HttpClient;
-
-      const executeOnce = <A>(request: ApiRequest<A>) =>
-        Effect.gen(function* () {
-          const headers = yield* auth.headersFor({
-            family: request.family,
-            bearerToken: request.bearerToken,
-          });
-
-          const response = yield* http.execute(
-            request.request.pipe(HttpClientRequest.setHeaders(headers)),
-          ).pipe(Effect.mapError(mapHttpClientError));
-
-          yield* cookies.applySetCookies(response.cookies);
-
-          if (response.headers["x-rate-limit-incoming"] === "0") {
-            yield* auth.invalidate;
-          }
-
-          const okResponse = yield* ensureSuccessStatus(
-            request.endpointId,
-            response,
-          );
-
-          return yield* decodeJsonResponse(request, okResponse);
-        });
-
-      const execute = (request: ApiRequest<unknown>) =>
-        executeOnce(request).pipe(
-          Effect.catchTag("HttpStatusError", (error) =>
-            request.bearerToken === "default" &&
-            (error.status === 401 || error.status === 403)
-              ? auth.invalidate.pipe(Effect.flatMap(() => executeOnce(request)))
-              : Effect.fail(error),
-          ),
-          Effect.withSpan(`ScraperStrategy.execute.${request.endpointId}`),
-        );
-
-      return { execute };
+      return { execute: createStrategyExecute(auth, cookies, http) };
     }),
   );
 }

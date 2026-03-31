@@ -65,3 +65,7 @@ export interface TimelinePage<T> {
 export interface GetTweetsOptions {
   readonly limit?: number;
 }
+
+export interface GetProfilesOptions {
+  readonly limit?: number;
+}

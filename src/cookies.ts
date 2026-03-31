@@ -1,12 +1,57 @@
 import { Duration, Effect, Layer, Option, Ref, ServiceMap } from "effect";
 import * as Cookies from "effect/unstable/http/Cookies";
 
+export interface SerializedCookieObject {
+  readonly key?: string;
+  readonly name?: string;
+  readonly value?: string;
+  readonly domain?: string;
+  readonly path?: string;
+  readonly httpOnly?: boolean;
+  readonly secure?: boolean;
+}
+
+export type SerializedCookie = string | SerializedCookieObject;
+
 const shouldDeleteCookie = (cookie: Cookies.Cookie) =>
   cookie.value.length === 0 ||
   (cookie.options?.maxAge !== undefined &&
     Duration.toMillis(Duration.fromInputUnsafe(cookie.options.maxAge)) <= 0) ||
   (cookie.options?.expires !== undefined &&
     cookie.options.expires.getTime() <= 0);
+
+const normalizeSerializedCookie = (serializedCookie: SerializedCookie) => {
+  if (typeof serializedCookie === "string") {
+    return serializedCookie;
+  }
+
+  const name = serializedCookie.name ?? serializedCookie.key;
+  if (!name || serializedCookie.value === undefined) {
+    return undefined;
+  }
+
+  const parts = [`${name}=${serializedCookie.value}`];
+  if (serializedCookie.domain) {
+    parts.push(
+      `Domain=${
+        serializedCookie.domain.startsWith(".")
+          ? serializedCookie.domain.slice(1)
+          : serializedCookie.domain
+      }`,
+    );
+  }
+  if (serializedCookie.path) {
+    parts.push(`Path=${serializedCookie.path}`);
+  }
+  if (serializedCookie.httpOnly) {
+    parts.push("HttpOnly");
+  }
+  if (serializedCookie.secure) {
+    parts.push("Secure");
+  }
+
+  return parts.join("; ");
+};
 
 const snapshotStore = (cookies: Cookies.Cookies) =>
   Object.fromEntries(
@@ -24,6 +69,10 @@ export class CookieManager extends ServiceMap.Service<
     readonly applySetCookies: (
       setCookies: Cookies.Cookies,
     ) => Effect.Effect<void>;
+    readonly restoreSerializedCookies: (
+      serializedCookies: Iterable<SerializedCookie>,
+    ) => Effect.Effect<void>;
+    readonly serializeCookies: Effect.Effect<readonly string[]>;
     readonly snapshot: Effect.Effect<Readonly<Record<string, string>>>;
     readonly clear: Effect.Effect<void>;
   }
@@ -68,6 +117,29 @@ export class CookieManager extends ServiceMap.Service<
             return next;
           }).pipe(Effect.asVoid);
 
+        const restoreSerializedCookies = (
+          serializedCookies: Iterable<SerializedCookie>,
+        ) =>
+          Ref.update(store, (cookies) => {
+            let next = cookies;
+
+            for (const serializedCookie of serializedCookies) {
+              const normalizedCookie = normalizeSerializedCookie(serializedCookie);
+              if (!normalizedCookie) {
+                continue;
+              }
+
+              const parsedCookies = Cookies.fromSetCookie(normalizedCookie);
+              for (const cookie of Object.values(parsedCookies.cookies)) {
+                next = shouldDeleteCookie(cookie)
+                  ? Cookies.remove(next, cookie.name)
+                  : Cookies.setUnsafe(next, cookie.name, cookie.value, cookie.options);
+              }
+            }
+
+            return next;
+          }).pipe(Effect.asVoid);
+
         const snapshot = Ref.get(store).pipe(
           Effect.map((cookies) => snapshotStore(cookies)),
         );
@@ -78,11 +150,17 @@ export class CookieManager extends ServiceMap.Service<
           Effect.map((cookies) => Cookies.toCookieHeader(cookies)),
         );
 
+        const serializeCookies = Ref.get(store).pipe(
+          Effect.map((cookies) => Cookies.toSetCookieHeaders(cookies)),
+        );
+
         return {
           getCookieHeader,
           get,
           put,
           applySetCookies,
+          restoreSerializedCookies,
+          serializeCookies,
           snapshot,
           clear,
         };

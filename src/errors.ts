@@ -28,3 +28,9 @@ export class ProfileNotFoundError extends Data.TaggedError(
 )<{
   readonly username: string;
 }> {}
+
+export class AuthenticationError extends Data.TaggedError(
+  "AuthenticationError",
+)<{
+  readonly reason: string;
+}> {}
