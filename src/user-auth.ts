@@ -2,27 +2,15 @@ import { Effect, Layer, ServiceMap } from "effect";
 
 import { CookieManager, type SerializedCookie } from "./cookies";
 import { TwitterConfig } from "./config";
-import type { BearerTokenName, EndpointFamily } from "./request";
+import { buildBaseHeaders } from "./header-policy";
+import { RequestAuth } from "./request-auth";
+import { TwitterTransactionId } from "./transaction-id";
+import { TwitterXpff } from "./xpff";
 
-export class UserAuth extends ServiceMap.Service<
-  UserAuth,
-  {
-    readonly headersFor: (options: {
-      readonly family: EndpointFamily;
-      readonly bearerToken: BearerTokenName;
-    }) => Effect.Effect<Readonly<Record<string, string>>>;
-    readonly invalidate: Effect.Effect<void>;
-    readonly isLoggedIn: () => Effect.Effect<boolean>;
-    readonly restoreCookies: (
-      serializedCookies: Iterable<SerializedCookie>,
-    ) => Effect.Effect<void>;
-    readonly serializeCookies: Effect.Effect<readonly string[]>;
-  }
->()("@better-twitter-scraper/UserAuth") {
-  static readonly liveLayer = Layer.effect(
+const makeBaseUserAuthLayer = () =>
+  Layer.effect(
     UserAuth,
     Effect.gen(function* () {
-      const config = yield* TwitterConfig;
       const cookies = yield* CookieManager;
 
       const isLoggedIn = Effect.fn("UserAuth.isLoggedIn")(function* () {
@@ -38,43 +26,7 @@ export class UserAuth extends ServiceMap.Service<
         yield* cookies.restoreSerializedCookies(serializedCookies);
       });
 
-      const headersFor = Effect.fn("UserAuth.headersFor")(function* (options: {
-        readonly family: EndpointFamily;
-        readonly bearerToken: BearerTokenName;
-      }) {
-        const cookieHeader = yield* cookies.getCookieHeader;
-        const csrfToken = yield* cookies.get("ct0");
-
-        const headers: Record<string, string> = {
-          ...config.requestProfile.commonHeaders,
-          authorization: `Bearer ${
-            options.bearerToken === "secondary"
-              ? config.bearerTokens.secondary
-              : config.bearerTokens.default
-          }`,
-        };
-
-        if (options.family === "graphql") {
-          Object.assign(headers, config.requestProfile.graphqlHeaders);
-        }
-
-        if (cookieHeader) {
-          headers.cookie = cookieHeader;
-        }
-
-        if (csrfToken) {
-          headers["x-csrf-token"] = csrfToken;
-        }
-
-        headers["x-twitter-auth-type"] = "OAuth2Session";
-        headers["x-twitter-active-user"] = "yes";
-        headers["x-twitter-client-language"] = "en";
-
-        return headers;
-      });
-
       return {
-        headersFor,
         invalidate: Effect.void,
         isLoggedIn: () => isLoggedIn(),
         restoreCookies,
@@ -82,4 +34,81 @@ export class UserAuth extends ServiceMap.Service<
       };
     }),
   );
+
+const makeUserRequestAuthLayer = () =>
+  Layer.effect(
+    RequestAuth,
+    Effect.gen(function* () {
+      const config = yield* TwitterConfig;
+      const cookies = yield* CookieManager;
+      const transactionId = yield* TwitterTransactionId;
+      const xpff = yield* TwitterXpff;
+
+      return {
+        headersFor: Effect.fn("RequestAuth.userHeadersFor")(function* (request) {
+          const cookieHeader = yield* cookies.getCookieHeader;
+          const csrfToken = yield* cookies.get("ct0");
+          const baseHeaders = buildBaseHeaders({
+            config,
+            request,
+            ...(cookieHeader ? { cookieHeader } : {}),
+            ...(csrfToken ? { csrfToken } : {}),
+          });
+          const transactionHeaders = yield* transactionId.headerFor({
+            method: request.method,
+            url: request.url,
+          });
+          const xpffHeaders = yield* xpff.headerFor();
+
+          return {
+            ...baseHeaders,
+            "x-twitter-active-user": "yes",
+            "x-twitter-auth-type": "OAuth2Session",
+            "x-twitter-client-language": "en",
+            ...transactionHeaders,
+            ...xpffHeaders,
+          } as const;
+        }),
+        invalidate: Effect.void,
+      };
+    }),
+  );
+
+export class UserAuth extends ServiceMap.Service<
+  UserAuth,
+  {
+    readonly invalidate: Effect.Effect<void>;
+    readonly isLoggedIn: () => Effect.Effect<boolean>;
+    readonly restoreCookies: (
+      serializedCookies: Iterable<SerializedCookie>,
+    ) => Effect.Effect<void>;
+    readonly serializeCookies: Effect.Effect<readonly string[]>;
+  }
+>()("@better-twitter-scraper/UserAuth") {
+  static get liveLayer() {
+    return Layer.mergeAll(
+      makeBaseUserAuthLayer(),
+      makeUserRequestAuthLayer().pipe(
+        Layer.provideMerge(makeBaseUserAuthLayer()),
+      ),
+    ).pipe(
+      Layer.provideMerge(TwitterXpff.liveLayer),
+      Layer.provideMerge(TwitterTransactionId.liveLayer),
+    );
+  }
+
+  static testLayer(options: {
+    readonly transactionId?: string;
+    readonly xpff?: string;
+  } = {}) {
+    return Layer.mergeAll(
+      makeBaseUserAuthLayer(),
+      makeUserRequestAuthLayer().pipe(
+        Layer.provideMerge(makeBaseUserAuthLayer()),
+      ),
+    ).pipe(
+      Layer.provideMerge(TwitterXpff.testLayer(options.xpff)),
+      Layer.provideMerge(TwitterTransactionId.testLayer(options.transactionId)),
+    );
+  }
 }

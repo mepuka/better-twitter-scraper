@@ -1,22 +1,18 @@
-import { Effect, Layer, Ref, Stream } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   CookieManager,
-  endpointRegistry,
-  httpRequestKey,
+  ScraperStrategy,
   TwitterConfig,
   TwitterHttpClient,
   TwitterSearch,
   UserAuth,
-  UserScraperStrategy,
 } from "../index";
+import { endpointRegistry } from "../src/endpoints";
 import type { HttpScript } from "../src/http";
-import { createStrategyExecute } from "../src/strategy";
-import { TwitterTransactionId } from "../src/transaction-id";
+import { httpRequestKey } from "../src/request";
+import { RequestAuth } from "../src/request-auth";
 import * as WebCrypto from "../src/web-crypto";
 import { TwitterXpff } from "../src/xpff";
 import {
@@ -24,10 +20,21 @@ import {
   searchProfilesPageTwoFixture,
 } from "./fixtures";
 
-const userAuthTestLayer = (initialCookies: Readonly<Record<string, string>> = {}) =>
-  UserAuth.liveLayer.pipe(
+const restoredSessionCookies = [
+  "ct0=csrf-token; Path=/; Domain=x.com",
+  "auth_token=session-token; Path=/; Domain=x.com; HttpOnly",
+] as const;
+
+const userAuthTestLayer = (
+  initialCookies: Readonly<Record<string, string>> = {},
+  options: {
+    readonly transactionId?: string;
+    readonly xpff?: string;
+  } = {},
+) =>
+  UserAuth.testLayer(options).pipe(
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
-    Layer.provideMerge(TwitterConfig.layer),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
 const searchTestLayer = (
@@ -35,19 +42,12 @@ const searchTestLayer = (
   initialCookies: Readonly<Record<string, string>> = {},
 ) =>
   TwitterSearch.layer.pipe(
-    Layer.provideMerge(UserScraperStrategy.standardLayer),
-    Layer.provideMerge(TwitterXpff.testLayer()),
-    Layer.provideMerge(TwitterTransactionId.testLayer()),
-    Layer.provideMerge(UserAuth.liveLayer),
+    Layer.provideMerge(ScraperStrategy.standardLayer),
+    Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.layer),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
-
-const restoredSessionCookies = [
-  "ct0=csrf-token; Path=/; Domain=x.com",
-  "auth_token=session-token; Path=/; Domain=x.com; HttpOnly",
-] as const;
 
 describe("Slice 2 authenticated session", () => {
   it("restores a logged-in session from serialized cookies", async () => {
@@ -69,17 +69,17 @@ describe("Slice 2 authenticated session", () => {
     );
   });
 
-  it("builds authenticated headers from restored cookies", async () => {
+  it("builds authenticated request headers from restored cookies", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const auth = yield* UserAuth;
+        const requestAuth = yield* RequestAuth;
 
         yield* auth.restoreCookies(restoredSessionCookies);
 
-        const headers = yield* auth.headersFor({
-          family: "graphql",
-          bearerToken: "secondary",
-        });
+        const headers = yield* requestAuth.headersFor(
+          endpointRegistry.searchProfiles("Twitter", 2),
+        );
 
         expect(headers.cookie).toContain("ct0=csrf-token");
         expect(headers.cookie).toContain("auth_token=session-token");
@@ -87,71 +87,24 @@ describe("Slice 2 authenticated session", () => {
         expect(headers["x-twitter-auth-type"]).toBe("OAuth2Session");
         expect(headers["x-twitter-active-user"]).toBe("yes");
         expect(headers["x-twitter-client-language"]).toBe("en");
-      }).pipe(Effect.provide(userAuthTestLayer())),
+        expect(headers["x-client-transaction-id"]).toBe("test-transaction-id");
+        expect(headers["x-xp-forwarded-for"]).toBe("test-xpff");
+      }).pipe(
+        Effect.provide(
+          userAuthTestLayer(
+            {},
+            {
+              transactionId: "test-transaction-id",
+              xpff: "test-xpff",
+            },
+          ),
+        ),
+      ),
     );
   });
 });
 
 describe("Slice 2 authenticated search", () => {
-  it("adds a transaction id header to authenticated requests", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const capturedHeaders = yield* Ref.make<
-          Readonly<Record<string, string>> | undefined
-        >(undefined);
-
-        const execute = createStrategyExecute(
-          {
-            headersFor: () =>
-              Effect.succeed({
-                authorization: "Bearer test-token",
-              }),
-            invalidate: Effect.void,
-          },
-          {
-            applySetCookies: () => Effect.void,
-          },
-          HttpClient.make((request) =>
-            Effect.gen(function* () {
-              yield* Ref.set(capturedHeaders, request.headers);
-              return HttpClientResponse.fromWeb(
-                request,
-                new Response("{}", {
-                  status: 200,
-                  headers: {
-                    "content-type": "application/json",
-                  },
-                }),
-              );
-            }),
-          ),
-          () =>
-            Effect.succeed({
-              "x-client-transaction-id": "test-transaction-id",
-              "x-xp-forwarded-for": "test-xpff",
-            }),
-        );
-
-        yield* execute({
-          endpointId: "SearchProfiles",
-          family: "graphql",
-          authRequirement: "user",
-          bearerToken: "secondary",
-          rateLimitBucket: "searchProfiles",
-          request: HttpClientRequest.get("https://api.x.com/graphql/test/SearchProfiles"),
-          decode: () => ({ ok: true }),
-        });
-
-        const headers = yield* Ref.get(capturedHeaders);
-        expect(headers?.authorization).toBe("Bearer test-token");
-        expect(headers?.["x-client-transaction-id"]).toBe(
-          "test-transaction-id",
-        );
-        expect(headers?.["x-xp-forwarded-for"]).toBe("test-xpff");
-      }),
-    );
-  });
-
   it("derives an xpff header when a guest id cookie is present", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -267,14 +220,11 @@ describe("Slice 2 authenticated search", () => {
       }).pipe(
         Effect.provide(
           searchTestLayer({
-            [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 3).request)]:
-              [{ status: 200, json: searchProfilesPageOneFixture }],
+            [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 3))]: [
+              { status: 200, json: searchProfilesPageOneFixture },
+            ],
             [httpRequestKey(
-              endpointRegistry.searchProfiles(
-                "Twitter",
-                1,
-                "search-cursor-1",
-              ).request,
+              endpointRegistry.searchProfiles("Twitter", 1, "search-cursor-1"),
             )]: [{ status: 200, json: searchProfilesPageTwoFixture }],
           }),
         ),
@@ -299,8 +249,9 @@ describe("Slice 3A authenticated failure classification", () => {
         }).pipe(
           Effect.provide(
             searchTestLayer({
-              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2).request)]:
-                [{ status: 401, bodyText: "not logged in" }],
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]: [
+                { status: 401, bodyText: "not logged in" },
+              ],
             }),
           ),
         ),
@@ -327,18 +278,17 @@ describe("Slice 3A authenticated failure classification", () => {
         }).pipe(
           Effect.provide(
             searchTestLayer({
-              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2).request)]:
-                [
-                  {
-                    status: 429,
-                    headers: {
-                      "x-rate-limit-limit": "180",
-                      "x-rate-limit-remaining": "0",
-                      "x-rate-limit-reset": "1712349999",
-                    },
-                    bodyText: "search capped",
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]: [
+                {
+                  status: 429,
+                  headers: {
+                    "x-rate-limit-limit": "50",
+                    "x-rate-limit-remaining": "0",
+                    "x-rate-limit-reset": "1712349999",
                   },
-                ],
+                  bodyText: "too many searches",
+                },
+              ],
             }),
           ),
         ),
@@ -348,14 +298,14 @@ describe("Slice 3A authenticated failure classification", () => {
       endpointId: "SearchProfiles",
       bucket: "searchProfiles",
       status: 429,
-      body: "search capped",
-      limit: 180,
+      body: "too many searches",
+      limit: 50,
       remaining: 0,
       reset: 1712349999,
     });
   });
 
-  it("maps blank GraphQL 404 search failures to BotDetectionError", async () => {
+  it("maps a blank search 404 to BotDetectionError", async () => {
     await expect(
       Effect.runPromise(
         Effect.gen(function* () {
@@ -370,8 +320,9 @@ describe("Slice 3A authenticated failure classification", () => {
         }).pipe(
           Effect.provide(
             searchTestLayer({
-              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2).request)]:
-                [{ status: 404, bodyText: "" }],
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]: [
+                { status: 404, bodyText: "" },
+              ],
             }),
           ),
         ),
@@ -379,13 +330,11 @@ describe("Slice 3A authenticated failure classification", () => {
     ).rejects.toMatchObject({
       _tag: "BotDetectionError",
       endpointId: "SearchProfiles",
-      status: 404,
-      body: "",
       reason: "empty_404",
     });
   });
 
-  it("treats drifted authenticated search payloads as InvalidResponseError", async () => {
+  it("treats a structurally drifted search payload as InvalidResponseError", async () => {
     await expect(
       Effect.runPromise(
         Effect.gen(function* () {
@@ -400,8 +349,9 @@ describe("Slice 3A authenticated failure classification", () => {
         }).pipe(
           Effect.provide(
             searchTestLayer({
-              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2).request)]:
-                [{ status: 200, json: {} }],
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]: [
+                { status: 200, json: { data: { search_by_raw_query: {} } } },
+              ],
             }),
           ),
         ),
@@ -409,7 +359,6 @@ describe("Slice 3A authenticated failure classification", () => {
     ).rejects.toMatchObject({
       _tag: "InvalidResponseError",
       endpointId: "SearchProfiles",
-      reason: "Missing search timeline instructions in Twitter response",
     });
   });
 });

@@ -1,13 +1,12 @@
 import { spawnSync } from "node:child_process";
 
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
   CookieManager,
-  twitterPublicLiveLayer,
-  TwitterPublic,
   TwitterConfig,
+  TwitterHttpClient,
   UserAuth,
 } from "../index";
 import { loadSerializedCookies } from "../src/live-auth-cookies";
@@ -19,37 +18,68 @@ const { cookies: serializedCookies, error: serializedCookiesError } =
 
 const userAuthLiveLayer = UserAuth.liveLayer.pipe(
   Layer.provideMerge(CookieManager.liveLayer),
-  Layer.provideMerge(TwitterConfig.layer),
+  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer),
+  Layer.provideMerge(TwitterConfig.testLayer()),
 );
 
 describe("Live guest smoke", () => {
   if (runLive) {
     it("loads a public profile anonymously", async () => {
-      await Effect.runPromise(
-        Effect.gen(function* () {
-        const publicApi = yield* TwitterPublic;
-        const profile = yield* publicApi.getProfile("nomadic_ua");
+      const result = spawnSync("bun", ["scripts/live-guest-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
 
-        expect(profile.userId).toBeTruthy();
-        expect(profile.username?.toLowerCase()).toBe("nomadic_ua");
-        }).pipe(Effect.provide(twitterPublicLiveLayer)),
-      );
-    }, 30000);
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly profile: {
+          readonly userId?: string;
+          readonly username?: string;
+        };
+      };
+
+      expect(payload.profile.userId).toBeTruthy();
+      expect(payload.profile.username?.toLowerCase()).toBe("nomadic_ua");
+    }, 30_000);
 
     it("loads a public tweet timeline anonymously", async () => {
-      await Effect.runPromise(
-        Effect.gen(function* () {
-        const publicApi = yield* TwitterPublic;
-        const tweets = yield* Stream.runCollect(
-          publicApi.getTweets("XDevelopers", { limit: 3 }),
-        );
-        const values = tweets;
+      const result = spawnSync("bun", ["scripts/live-guest-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
 
-        expect(values.length).toBeGreaterThan(0);
-        expect(values[0]?.id).toBeTruthy();
-        }).pipe(Effect.provide(twitterPublicLiveLayer)),
-      );
-    }, 30000);
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly tweets: ReadonlyArray<{
+          readonly id?: string;
+        }>;
+      };
+
+      expect(payload.tweets.length).toBeGreaterThan(0);
+      expect(payload.tweets[0]?.id).toBeTruthy();
+    }, 30_000);
   } else {
     it.skip("loads a public profile anonymously", () => {});
     it.skip("loads a public tweet timeline anonymously", () => {});
@@ -72,18 +102,14 @@ describe("Live authenticated smoke", () => {
           expect(yield* auth.isLoggedIn()).toBe(true);
         }).pipe(Effect.provide(userAuthLiveLayer)),
       );
-    }, 30000);
+    }, 30_000);
 
     it("searches profiles with restored cookies", async () => {
-      const result = spawnSync(
-        "bun",
-        ["scripts/live-auth-smoke.ts"],
-        {
-          cwd: process.cwd(),
-          env: process.env,
-          encoding: "utf8",
-        },
-      );
+      const result = spawnSync("bun", ["scripts/live-auth-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
 
       const stdout = result.stdout.trim();
       const stderr = result.stderr.trim();
@@ -99,7 +125,7 @@ describe("Live authenticated smoke", () => {
       const usernames = JSON.parse(stdout) as string[];
       expect(usernames.length).toBeGreaterThan(0);
       expect(usernames[0]).toBeTruthy();
-    }, 30000);
+    }, 30_000);
   } else {
     it.skip("restores a signed-in session from cookies", () => {});
     it.skip("searches profiles with restored cookies", () => {});

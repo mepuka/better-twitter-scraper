@@ -1,11 +1,8 @@
 import { Effect, Layer, ServiceMap } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
 import type * as Cookies from "effect/unstable/http/Cookies";
 
 import { CookieManager } from "./cookies";
-import { GuestAuth } from "./guest-auth";
 import {
   AuthenticationError,
   BotDetectionError,
@@ -18,11 +15,15 @@ import {
 } from "./errors";
 import {
   classifyHttpStatusError,
-  decodeJsonResponse,
-  ensureSuccessStatus,
-  mapHttpClientError,
+  decodeParsedBody,
 } from "./http-client-utils";
-import type { ApiRequest } from "./request";
+import { TwitterHttpClient } from "./http";
+import { RequestAuth, type RequestAuthError } from "./request-auth";
+import {
+  prepareApiRequest,
+  type ApiRequest,
+  type PreparedApiRequest,
+} from "./request";
 
 export type StrategyError =
   | AuthenticationError
@@ -32,15 +33,8 @@ export type StrategyError =
   | InvalidResponseError
   | ProfileNotFoundError
   | RateLimitError
+  | RequestAuthError
   | TransportError;
-
-export interface StrategyAuth {
-  readonly headersFor: (options: {
-    readonly family: ApiRequest<unknown>["family"];
-    readonly bearerToken: ApiRequest<unknown>["bearerToken"];
-  }) => Effect.Effect<Readonly<Record<string, string>>, StrategyError>;
-  readonly invalidate: Effect.Effect<void>;
-}
 
 export interface StrategyCookies {
   readonly applySetCookies: (
@@ -48,35 +42,37 @@ export interface StrategyCookies {
   ) => Effect.Effect<void>;
 }
 
-export type StrategyHeaderDecorator = (
-  request: ApiRequest<unknown>,
-) => Effect.Effect<Readonly<Record<string, string>>, StrategyError>;
+interface StrategyRequestAuth {
+  readonly headersFor: (
+    request: ApiRequest<unknown>,
+  ) => Effect.Effect<Readonly<Record<string, string>>, RequestAuthError>;
+  readonly invalidate: Effect.Effect<void>;
+}
+
+interface StrategyTransport {
+  readonly execute: <A>(
+    request: PreparedApiRequest<A>,
+  ) => Effect.Effect<
+    {
+      readonly headers: Readonly<Record<string, string>>;
+      readonly cookies: Cookies.Cookies;
+      readonly body: string | unknown;
+    },
+    HttpStatusError | InvalidResponseError | TransportError
+  >;
+}
 
 export const createStrategyExecute = (
-  auth: StrategyAuth,
+  auth: StrategyRequestAuth,
   cookies: StrategyCookies,
-  http: HttpClient.HttpClient,
-  decorateHeaders?: StrategyHeaderDecorator,
+  http: StrategyTransport,
 ) => {
   const executeOnce = <A>(
     request: ApiRequest<A>,
   ): Effect.Effect<A, StrategyError> =>
     Effect.gen(function* () {
-      const baseHeaders = yield* auth.headersFor({
-        family: request.family,
-        bearerToken: request.bearerToken,
-      });
-      const decoratedHeaders = decorateHeaders
-        ? yield* decorateHeaders(request)
-        : {};
-      const headers = {
-        ...baseHeaders,
-        ...decoratedHeaders,
-      };
-
-      const response = yield* http.execute(
-        request.request.pipe(HttpClientRequest.setHeaders(headers)),
-      ).pipe(Effect.mapError(mapHttpClientError));
+      const headers = yield* auth.headersFor(request);
+      const response = yield* http.execute(prepareApiRequest(request, headers));
 
       yield* cookies.applySetCookies(response.cookies);
 
@@ -84,12 +80,10 @@ export const createStrategyExecute = (
         yield* auth.invalidate;
       }
 
-      const okResponse = yield* ensureSuccessStatus(request.endpointId, response);
-
-      return yield* decodeJsonResponse(request, okResponse);
+      return yield* decodeParsedBody(request, response.body);
     });
 
-  return (request: ApiRequest<unknown>): Effect.Effect<unknown, StrategyError> =>
+  return <A>(request: ApiRequest<A>): Effect.Effect<A, StrategyError> =>
     executeOnce(request).pipe(
       Effect.catchTag("HttpStatusError", (error) =>
         request.bearerToken === "default" && (error.status === 401 || error.status === 403)
@@ -106,18 +100,23 @@ export const createStrategyExecute = (
 export class ScraperStrategy extends ServiceMap.Service<
   ScraperStrategy,
   {
-    readonly execute: (
-      request: ApiRequest<unknown>,
-    ) => Effect.Effect<unknown, StrategyError>;
+    readonly execute: <A>(
+      request: ApiRequest<A>,
+    ) => Effect.Effect<A, StrategyError>;
   }
 >()("@better-twitter-scraper/ScraperStrategy") {
-  static readonly standardLayer = Layer.effect(
-    ScraperStrategy,
-    Effect.gen(function* () {
-      const auth = yield* GuestAuth;
-      const cookies = yield* CookieManager;
-      const http = yield* HttpClient.HttpClient;
-      return { execute: createStrategyExecute(auth, cookies, http) };
-    }),
-  );
+  static get standardLayer() {
+    return Layer.effect(
+      ScraperStrategy,
+      Effect.gen(function* () {
+        const auth = yield* RequestAuth;
+        const cookies = yield* CookieManager;
+        const http = yield* TwitterHttpClient;
+
+        return {
+          execute: createStrategyExecute(auth, cookies, http),
+        };
+      }),
+    );
+  }
 }

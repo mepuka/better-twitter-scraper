@@ -4,9 +4,8 @@ import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
 import { AuthenticationError } from "./errors";
 import type { GetProfilesOptions, Profile, TimelinePage } from "./models";
-import { type StrategyError } from "./strategy";
+import { ScraperStrategy, type StrategyError } from "./strategy";
 import { UserAuth } from "./user-auth";
-import { UserScraperStrategy } from "./user-strategy";
 
 type SearchError = AuthenticationError | StrategyError;
 
@@ -31,7 +30,7 @@ export class TwitterSearch extends ServiceMap.Service<
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
       const auth = yield* UserAuth;
-      const strategy = yield* UserScraperStrategy;
+      const strategy = yield* ScraperStrategy;
 
       const fetchProfilesPage = Effect.fn("TwitterSearch.fetchProfilesPage")(function* (
         query: string,

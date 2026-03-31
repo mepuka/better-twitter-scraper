@@ -159,30 +159,28 @@ ScraperStrategy.Test       // no delays, no network
 Services depend on each other (e.g., `TwitterHttpClient` depends on auth and cookies). Use `Layer.provideMerge` to wire dependencies between layers, and `Layer.mergeAll` only for independent siblings.
 
 ```ts
-// Infrastructure: HttpClient depends on CookieManager, Config
-const InfraLive = TwitterHttpClient.Live.pipe(
-  Layer.provideMerge(CookieManager.Live),
-  Layer.provideMerge(RateLimiter.Live),
-  Layer.provideMerge(TwitterConfig.FromEnv),
-  Layer.provideMerge(HttpClient.layer),
+const GuestScraper = TwitterPublic.layer.pipe(
+  Layer.provideMerge(ScraperStrategy.standardLayer),
+  Layer.provideMerge(GuestAuth.liveLayer),
+  Layer.provideMerge(CookieManager.liveLayer),
+  Layer.provideMerge(TwitterHttpClient.fetchLayer),
+  Layer.provideMerge(TwitterConfig.fromEnvLayer),
 )
 
-// Guest scraper: strategy + guest auth + infra
-const GuestScraper = ScraperStrategy.Standard.pipe(
-  Layer.provideMerge(GuestAuth.Live),
-  Layer.provideMerge(InfraLive),
+const UserScraper = TwitterSearch.layer.pipe(
+  Layer.provideMerge(ScraperStrategy.standardLayer),
+  Layer.provideMerge(UserAuth.liveLayer),
+  Layer.provideMerge(CookieManager.liveLayer),
+  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer),
+  Layer.provideMerge(TwitterConfig.fromEnvLayer),
 )
 
-// User scraper: strategy + user auth + infra
-const UserScraper = ScraperStrategy.Standard.pipe(
-  Layer.provideMerge(UserAuth.Live),
-  Layer.provideMerge(InfraLive),
-)
-
-// Swap strategy — replace one layer, everything else unchanged
-const AggressiveUserScraper = ScraperStrategy.Aggressive.pipe(
-  Layer.provideMerge(UserAuth.Live),
-  Layer.provideMerge(InfraLive),
+const UserScraperTest = TwitterSearch.layer.pipe(
+  Layer.provideMerge(ScraperStrategy.standardLayer),
+  Layer.provideMerge(UserAuth.testLayer()),
+  Layer.provideMerge(CookieManager.testLayer()),
+  Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
+  Layer.provideMerge(TwitterConfig.testLayer()),
 )
 ```
 
@@ -380,17 +378,30 @@ Per-endpoint token buckets:
 
 ```ts
 interface TwitterConfig {
-  readonly bearerToken: Redacted       // Primary bearer token
-  readonly bearerToken2: Redacted      // Secondary (search, UserTweets, login)
-  readonly proxyUrl: Option<string>
-  readonly userAgent: string           // Default: Chrome 144 fingerprint
-  readonly timeout: Duration           // Default: 30s
-  readonly maxRetries: number          // Default: 3
-  readonly interPageDelay: Duration    // Default: 1s (+ jitter)
+  readonly bearerTokens: {
+    readonly default: Redacted
+    readonly secondary: Redacted
+  }
+  readonly urls: {
+    readonly guestActivate: string
+  }
+  readonly proxyUrl?: string
+  readonly userAgent: string
+  readonly requestTimeout: Duration
+  readonly guestTokenTtl: Duration
+  readonly timeline: {
+    readonly defaultLimit: number
+    readonly maxPageSize: number
+    readonly includePromotedContent: boolean
+  }
+  readonly search: {
+    readonly defaultLimit: number
+    readonly maxPageSize: number
+  }
 }
 ```
 
-Loaded from environment via `Effect.Config`. Sensitive values use `Config.redacted`.
+Loaded from environment via `Effect.Config`. Sensitive values use `Config.redacted`, and tests use `TwitterConfig.testLayer()` so they never depend on process env.
 
 ---
 

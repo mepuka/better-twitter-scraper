@@ -1,36 +1,28 @@
-import { Clock, Effect, Layer, Option, Ref, Schema, ServiceMap } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import { Clock, Duration, Effect, Layer, Option, Ref, ServiceMap } from "effect";
 
 import { CookieManager } from "./cookies";
 import { TwitterConfig } from "./config";
+import { endpointRegistry } from "./endpoints";
 import {
   GuestTokenError,
   HttpStatusError,
   InvalidResponseError,
   TransportError,
 } from "./errors";
-import {
-  ensureSuccessStatus,
-  mapHttpClientError,
-} from "./http-client-utils";
-import type { BearerTokenName, EndpointFamily } from "./request";
+import { buildBaseHeaders } from "./header-policy";
+import { TwitterHttpClient } from "./http";
+import { RequestAuth } from "./request-auth";
+import { prepareApiRequest } from "./request";
 
-const GuestActivationPayload = Schema.Struct({
-  guest_token: Schema.String,
-});
+const invalidGuestActivationPayload = (reason: string) =>
+  new InvalidResponseError({
+    endpointId: "GuestActivate",
+    reason,
+  });
 
 export class GuestAuth extends ServiceMap.Service<
   GuestAuth,
   {
-    readonly headersFor: (options: {
-      readonly family: EndpointFamily;
-      readonly bearerToken: BearerTokenName;
-    }) => Effect.Effect<
-      Readonly<Record<string, string>>,
-      GuestTokenError | HttpStatusError | InvalidResponseError | TransportError
-    >;
     readonly invalidate: Effect.Effect<void>;
     readonly currentToken: () => Effect.Effect<
       string,
@@ -42,12 +34,18 @@ export class GuestAuth extends ServiceMap.Service<
     }>;
   }
 >()("@better-twitter-scraper/GuestAuth") {
-  static readonly liveLayer = Layer.effect(
+  static get liveLayer() {
+    return createGuestAuthContextLayer();
+  }
+}
+
+function createGuestAuthContextLayer() {
+  const guestAuthLayer = Layer.effect(
     GuestAuth,
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
       const cookies = yield* CookieManager;
-      const http = yield* HttpClient.HttpClient;
+      const http = yield* TwitterHttpClient;
       const tokenRef = yield* Ref.make(Option.none<string>());
       const authenticatedAtRef = yield* Ref.make(Option.none<number>());
 
@@ -56,78 +54,37 @@ export class GuestAuth extends ServiceMap.Service<
         yield* Ref.set(authenticatedAtRef, Option.none<number>());
       });
 
-      const headersFor = Effect.fn("GuestAuth.headersFor")(function* (options: {
-        readonly family: EndpointFamily;
-        readonly bearerToken: BearerTokenName;
-      }) {
+      const activate = Effect.fn("GuestAuth.activate")(function* () {
+        const request = endpointRegistry.guestActivate(config.urls.guestActivate);
         const cookieHeader = yield* cookies.getCookieHeader;
         const csrfToken = yield* cookies.get("ct0");
+        const headers = buildBaseHeaders({
+          config,
+          request,
+          ...(cookieHeader ? { cookieHeader } : {}),
+          ...(csrfToken ? { csrfToken } : {}),
+        });
 
-        const headers: Record<string, string> = {
-          ...config.requestProfile.commonHeaders,
-          authorization: `Bearer ${
-            options.bearerToken === "secondary"
-              ? config.bearerTokens.secondary
-              : config.bearerTokens.default
-          }`,
-        };
-
-        if (options.family === "graphql") {
-          Object.assign(headers, config.requestProfile.graphqlHeaders);
-        }
-
-        if (cookieHeader) {
-          headers.cookie = cookieHeader;
-        }
-
-        if (csrfToken) {
-          headers["x-csrf-token"] = csrfToken;
-        }
-
-        if (options.bearerToken === "default") {
-          headers["x-guest-token"] = yield* currentToken();
-        }
-
-        return headers;
-      });
-
-      const activate = Effect.fn("GuestAuth.activate")(function* () {
-        const cookieHeader = yield* cookies.getCookieHeader;
-        const request = HttpClientRequest.post(config.urls.guestActivate).pipe(
-          HttpClientRequest.bodyUrlParams({}),
-          HttpClientRequest.setHeaders({
-            ...config.requestProfile.commonHeaders,
-            authorization: `Bearer ${config.bearerTokens.default}`,
-            ...(cookieHeader ? { cookie: cookieHeader } : {}),
-          }),
-        );
-
-        const response = yield* http.execute(request).pipe(
-          Effect.mapError(mapHttpClientError),
-        );
+        const response = yield* http.execute(prepareApiRequest(request, headers));
 
         yield* cookies.applySetCookies(response.cookies);
 
-        const okResponse = yield* ensureSuccessStatus("GuestActivate", response);
-
-        const payload = yield* HttpClientResponse.schemaBodyJson(
-          GuestActivationPayload,
-        )(okResponse).pipe(
-          Effect.mapError(
-            (error) =>
-              new InvalidResponseError({
-                endpointId: "GuestActivate",
-                reason: error.message,
-              }),
-          ),
-        );
+        const guestToken =
+          response.body &&
+          typeof response.body === "object" &&
+          "guest_token" in response.body &&
+          typeof response.body.guest_token === "string"
+            ? response.body.guest_token
+            : yield* invalidGuestActivationPayload(
+                "Guest activation did not return a guest_token string.",
+              );
 
         const now = yield* Clock.currentTimeMillis;
-        yield* cookies.put("gt", payload.guest_token);
-        yield* Ref.set(tokenRef, Option.some(payload.guest_token));
+        yield* cookies.put("gt", guestToken);
+        yield* Ref.set(tokenRef, Option.some(guestToken));
         yield* Ref.set(authenticatedAtRef, Option.some(now));
 
-        return payload.guest_token;
+        return guestToken;
       });
 
       const currentToken = Effect.fn("GuestAuth.currentToken")(function* () {
@@ -138,7 +95,7 @@ export class GuestAuth extends ServiceMap.Service<
         if (
           Option.isSome(existingToken) &&
           Option.isSome(authenticatedAt) &&
-          now - authenticatedAt.value < config.guestTokenTtlMs
+          now - authenticatedAt.value < Duration.toMillis(config.guestTokenTtl)
         ) {
           return existingToken.value;
         }
@@ -159,11 +116,53 @@ export class GuestAuth extends ServiceMap.Service<
       });
 
       return {
-        headersFor,
         invalidate,
         currentToken: () => currentToken(),
         snapshot,
       };
     }),
+  );
+
+  const requestAuthLayer = Layer.effect(
+    RequestAuth,
+    Effect.gen(function* () {
+      const config = yield* TwitterConfig;
+      const cookies = yield* CookieManager;
+      const guestAuth = yield* GuestAuth;
+
+      return {
+        headersFor: Effect.fn("RequestAuth.guestHeadersFor")(function* (
+          request,
+        ) {
+          const cookieHeader = yield* cookies.getCookieHeader;
+          const csrfToken = yield* cookies.get("ct0");
+          const headers = buildBaseHeaders({
+            config,
+            request,
+            ...(cookieHeader ? { cookieHeader } : {}),
+            ...(csrfToken ? { csrfToken } : {}),
+          });
+
+          if (
+            request.authRequirement === "guest" &&
+            request.bearerToken === "default" &&
+            request.family !== "activation"
+          ) {
+            return {
+              ...headers,
+              "x-guest-token": yield* guestAuth.currentToken(),
+            } as const;
+          }
+
+          return headers;
+        }),
+        invalidate: guestAuth.invalidate,
+      };
+    }),
+  );
+
+  return Layer.mergeAll(
+    guestAuthLayer,
+    requestAuthLayer.pipe(Layer.provideMerge(guestAuthLayer)),
   );
 }

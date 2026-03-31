@@ -1,5 +1,3 @@
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-
 import type { Profile, TimelinePage, Tweet } from "./models";
 import {
   parseProfileResponse,
@@ -163,9 +161,9 @@ const stableJson = (value: unknown) => JSON.stringify(normalizeForJson(value));
 const buildUrl = (
   template: EndpointTemplate,
   overrides: {
-    readonly variables?: Record<string, unknown>;
-    readonly features?: Record<string, unknown>;
     readonly fieldToggles?: Record<string, unknown>;
+    readonly features?: Record<string, unknown>;
+    readonly variables?: Record<string, unknown>;
   } = {},
 ) => {
   const params = new URLSearchParams();
@@ -190,6 +188,24 @@ const buildUrl = (
 };
 
 export const endpointRegistry = {
+  guestActivate(url: string): ApiRequest<unknown> {
+    return {
+      endpointId: "GuestActivate",
+      family: "activation",
+      authRequirement: "guest",
+      bearerToken: "default",
+      rateLimitBucket: "guestActivation",
+      method: "POST",
+      url,
+      body: {
+        _tag: "form",
+        value: {},
+      },
+      responseKind: "json",
+      decode: (body) => body,
+    };
+  },
+
   userByScreenName(username: string): ApiRequest<Profile> {
     return {
       endpointId: "UserByScreenName",
@@ -197,14 +213,14 @@ export const endpointRegistry = {
       authRequirement: "guest",
       bearerToken: "secondary",
       rateLimitBucket: "profileLookup",
-      request: HttpClientRequest.get(
-        buildUrl(endpointTemplates.userByScreenName, {
-          variables: {
-            ...endpointTemplates.userByScreenName.variables,
-            screen_name: username,
-          },
-        }),
-      ),
+      method: "GET",
+      url: buildUrl(endpointTemplates.userByScreenName, {
+        variables: {
+          ...endpointTemplates.userByScreenName.variables,
+          screen_name: username,
+        },
+      }),
+      responseKind: "json",
       decode: (body) => parseProfileResponse(body, username),
     };
   },
@@ -221,17 +237,17 @@ export const endpointRegistry = {
       authRequirement: "guest",
       bearerToken: "secondary",
       rateLimitBucket: "userTweets",
-      request: HttpClientRequest.get(
-        buildUrl(endpointTemplates.userTweets, {
-          variables: {
-            ...endpointTemplates.userTweets.variables,
-            userId,
-            count,
-            includePromotedContent,
-            cursor,
-          },
-        }),
-      ),
+      method: "GET",
+      url: buildUrl(endpointTemplates.userTweets, {
+        variables: {
+          ...endpointTemplates.userTweets.variables,
+          userId,
+          count,
+          includePromotedContent,
+          cursor,
+        },
+      }),
+      responseKind: "json",
       decode: parseTimelinePageResponse,
     };
   },
@@ -247,17 +263,17 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "searchProfiles",
-      request: HttpClientRequest.get(
-        buildUrl(endpointTemplates.searchProfiles, {
-          variables: {
-            ...endpointTemplates.searchProfiles.variables,
-            rawQuery: query,
-            count,
-            product: "People",
-            cursor,
-          },
-        }),
-      ),
+      method: "GET",
+      url: buildUrl(endpointTemplates.searchProfiles, {
+        variables: {
+          ...endpointTemplates.searchProfiles.variables,
+          rawQuery: query,
+          count,
+          product: "People",
+          cursor,
+        },
+      }),
+      responseKind: "json",
       decode: parseSearchProfilesResponse,
     };
   },

@@ -1,11 +1,22 @@
-import { Effect, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 
 import {
-  twitterSearchLiveLayer,
+  CookieManager,
+  ScraperStrategy,
+  TwitterConfig,
+  TwitterHttpClient,
   TwitterSearch,
   UserAuth,
 } from "../index";
 import { loadSerializedCookies } from "../src/live-auth-cookies";
+
+const liveSearchLayer = TwitterSearch.layer.pipe(
+  Layer.provideMerge(ScraperStrategy.standardLayer),
+  Layer.provideMerge(UserAuth.liveLayer),
+  Layer.provideMerge(CookieManager.liveLayer),
+  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer),
+  Layer.provideMerge(TwitterConfig.testLayer()),
+);
 
 const main = async () => {
   const { cookies, error } = loadSerializedCookies();
@@ -40,7 +51,7 @@ const main = async () => {
       }
 
       return profiles.map((profile) => profile.username);
-    }).pipe(Effect.provide(twitterSearchLiveLayer)),
+    }).pipe(Effect.provide(liveSearchLayer)),
   );
 
   console.log(JSON.stringify(result));

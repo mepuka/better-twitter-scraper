@@ -1,8 +1,9 @@
-import { Data, Effect, Layer, Ref } from "effect";
+import { Data, Effect, Layer, Ref, ServiceMap } from "effect";
 import initCycleTLS, { type CycleTLSClient } from "cycletls";
+import * as Cookies from "effect/unstable/http/Cookies";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
@@ -13,7 +14,16 @@ import {
   CHROME_JA4R,
   CHROME_USER_AGENT,
 } from "./chrome-fingerprint";
-import { httpClientRequestUrl } from "./request";
+import {
+  HttpStatusError,
+  InvalidResponseError,
+  TransportError,
+} from "./errors";
+import {
+  httpClientRequestUrl,
+  httpRequestKey,
+  type PreparedApiRequest,
+} from "./request";
 
 export interface ScriptedHttpResponse {
   readonly status: number;
@@ -30,15 +40,19 @@ class CycleTlsInitError extends Data.TaggedError("CycleTlsInitError")<{
   readonly cause?: unknown;
 }> {}
 
-const requestUrl = (
-  request: HttpClientRequest.HttpClientRequest | Pick<HttpClientRequest.HttpClientRequest, "url">,
-) => ("urlParams" in request ? httpClientRequestUrl(request) : request.url);
+const toTransportError = (error: HttpClientError.HttpClientError) =>
+  new TransportError({
+    url: httpClientRequestUrl(error.request),
+    reason: error.message,
+    error,
+  });
 
-export const httpRequestKey = (
-  request:
-    | HttpClientRequest.HttpClientRequest
-    | Pick<HttpClientRequest.HttpClientRequest, "method" | "url">,
-) => `${request.method} ${requestUrl(request)}`;
+const toSortedHeaders = (
+  headers: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    Object.entries(headers).sort(([left], [right]) => left.localeCompare(right)),
+  );
 
 const toBodyText = (response: ScriptedHttpResponse) =>
   response.bodyText ??
@@ -224,14 +238,157 @@ const cycleTlsFetchLayer = Layer.effect(
   ).pipe(Effect.map(makeCycleTlsFetch)),
 );
 
-export class TwitterHttpClient {
-  static readonly liveLayer = FetchHttpClient.layer;
-  static readonly cycleTlsLayer = FetchHttpClient.layer.pipe(
-    Layer.provideMerge(cycleTlsFetchLayer),
-  );
+const makeMethodRequest = (
+  method: PreparedApiRequest<unknown>["method"],
+  url: string,
+) => {
+  switch (method) {
+    case "GET":
+      return HttpClientRequest.get(url);
+    case "PATCH":
+      return HttpClientRequest.patch(url);
+    case "POST":
+      return HttpClientRequest.post(url);
+    case "PUT":
+      return HttpClientRequest.put(url);
+  }
+};
+
+export const buildHttpClientRequest = (
+  request: PreparedApiRequest<unknown>,
+): Effect.Effect<
+  HttpClientRequest.HttpClientRequest,
+  InvalidResponseError
+> =>
+  Effect.gen(function* () {
+    let httpRequest = makeMethodRequest(request.method, request.url).pipe(
+      HttpClientRequest.setHeaders(request.headers),
+    );
+
+    switch (request.body._tag) {
+      case "form":
+        httpRequest = HttpClientRequest.bodyUrlParams(
+          httpRequest,
+          request.body.value,
+        );
+        break;
+      case "json":
+        httpRequest = yield* HttpClientRequest.bodyJson(
+          httpRequest,
+          request.body.value,
+        ).pipe(
+          Effect.mapError(
+            (error) =>
+              new InvalidResponseError({
+                endpointId: request.endpointId,
+                reason: error.message,
+              }),
+          ),
+        );
+        break;
+      case "none":
+        break;
+      case "text":
+        httpRequest = HttpClientRequest.bodyText(
+          httpRequest,
+          request.body.value,
+          request.body.contentType,
+        );
+        break;
+    }
+
+    return httpRequest;
+  });
+
+const decodeResponseBody = (
+  request: PreparedApiRequest<unknown>,
+  response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<string | unknown, InvalidResponseError> => {
+  switch (request.responseKind) {
+    case "html":
+    case "text":
+      return response.text.pipe(
+        Effect.mapError(
+          (error) =>
+            new InvalidResponseError({
+              endpointId: request.endpointId,
+              reason: error.message,
+            }),
+        ),
+      );
+    case "json":
+      return response.json.pipe(
+        Effect.mapError(
+          (error) =>
+            new InvalidResponseError({
+              endpointId: request.endpointId,
+              reason: error.message,
+            }),
+        ),
+      );
+  }
+};
+
+const executePrepared = (
+  http: HttpClient.HttpClient,
+  request: PreparedApiRequest<unknown>,
+) =>
+  Effect.gen(function* () {
+    const httpRequest = yield* buildHttpClientRequest(request);
+    const response = yield* http.execute(httpRequest).pipe(
+      Effect.mapError(toTransportError),
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+      const body = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
+      return yield* new HttpStatusError({
+        endpointId: request.endpointId,
+        status: response.status,
+        body: body.slice(0, 500),
+        headers: toSortedHeaders(response.headers),
+      });
+    }
+
+    const body = yield* decodeResponseBody(request, response);
+
+    return {
+      headers: toSortedHeaders(response.headers),
+      cookies: response.cookies,
+      body,
+    } as const;
+  });
+
+export class TwitterHttpClient extends ServiceMap.Service<
+  TwitterHttpClient,
+  {
+    readonly execute: <A>(
+      request: PreparedApiRequest<A>,
+    ) => Effect.Effect<
+      {
+        readonly headers: Readonly<Record<string, string>>;
+        readonly cookies: Cookies.Cookies;
+        readonly body: string | unknown;
+      },
+      HttpStatusError | InvalidResponseError | TransportError
+    >;
+  }
+>()("@better-twitter-scraper/TwitterHttpClient") {
+  static get fetchLayer() {
+    return makeTwitterHttpClientLayer().pipe(
+      Layer.provideMerge(FetchHttpClient.layer),
+    );
+  }
+
+  static get cycleTlsLayer() {
+    return makeTwitterHttpClientLayer().pipe(
+      Layer.provideMerge(
+        FetchHttpClient.layer.pipe(Layer.provideMerge(cycleTlsFetchLayer)),
+      ),
+    );
+  }
 
   static scriptedLayer(script: HttpScript) {
-    return Layer.effect(
+    const rawLayer = Layer.effect(
       HttpClient.HttpClient,
       Effect.gen(function* () {
         const state = yield* Ref.make(cloneScript(script));
@@ -265,10 +422,29 @@ export class TwitterHttpClient {
               });
             }
 
-            return HttpClientResponse.fromWeb(request, toWebResponse(scriptedResponse));
+            return HttpClientResponse.fromWeb(
+              request,
+              toWebResponse(scriptedResponse),
+            );
           }),
         );
       }),
     );
+
+    return makeTwitterHttpClientLayer().pipe(Layer.provideMerge(rawLayer));
   }
+}
+
+function makeTwitterHttpClientLayer() {
+  return Layer.effect(
+    TwitterHttpClient,
+    Effect.gen(function* () {
+      const http = yield* HttpClient.HttpClient;
+
+      return {
+        execute: <A>(request: PreparedApiRequest<A>) =>
+          executePrepared(http, request),
+      };
+    }),
+  );
 }

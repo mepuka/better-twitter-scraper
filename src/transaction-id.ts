@@ -1,16 +1,26 @@
 import { Effect, Layer, Option, Ref, ServiceMap } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
 import ClientTransaction from "x-client-transaction-id";
 import { parseHTML } from "linkedom";
 
-import type { TwitterConfigShape } from "./config";
+import {
+  CHROME_SEC_CH_UA,
+  CHROME_SEC_CH_UA_MOBILE,
+  CHROME_SEC_CH_UA_PLATFORM,
+} from "./chrome-fingerprint";
 import { TwitterConfig } from "./config";
-import { HttpStatusError, InvalidResponseError, TransportError } from "./errors";
-import { ensureSuccessStatus, mapHttpClientError } from "./http-client-utils";
+import {
+  HttpStatusError,
+  InvalidResponseError,
+  TransportError,
+} from "./errors";
+import { TwitterHttpClient } from "./http";
+import type { PreparedApiRequest } from "./request";
 
-type TransactionIdError = HttpStatusError | InvalidResponseError | TransportError;
+type TransactionIdError =
+  | HttpStatusError
+  | InvalidResponseError
+  | TransportError;
 type TransactionDocument = ReturnType<typeof parseHTML>["document"];
 
 const DOCUMENT_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -20,21 +30,17 @@ const migrationRedirectionRegex = new RegExp(
   "i",
 );
 
-const navigationHeaders = (
-  requestProfile: TwitterConfigShape["requestProfile"],
-): Readonly<Record<string, string>> => ({
-  "user-agent": requestProfile.commonHeaders["user-agent"] ?? "",
+const navigationHeaders = (userAgent: string): Readonly<Record<string, string>> => ({
+  "user-agent": userAgent,
   accept:
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-  "accept-language":
-    requestProfile.commonHeaders["accept-language"] ?? "en-US,en;q=0.9",
+  "accept-language": "en-US,en;q=0.9",
   "cache-control": "no-cache",
   pragma: "no-cache",
   priority: "u=0, i",
-  "sec-ch-ua": requestProfile.commonHeaders["sec-ch-ua"] ?? "",
-  "sec-ch-ua-mobile": requestProfile.commonHeaders["sec-ch-ua-mobile"] ?? "?0",
-  "sec-ch-ua-platform":
-    requestProfile.commonHeaders["sec-ch-ua-platform"] ?? '"Windows"',
+  "sec-ch-ua": CHROME_SEC_CH_UA,
+  "sec-ch-ua-mobile": CHROME_SEC_CH_UA_MOBILE,
+  "sec-ch-ua-platform": CHROME_SEC_CH_UA_PLATFORM,
   "sec-fetch-dest": "document",
   "sec-fetch-mode": "navigate",
   "sec-fetch-site": "none",
@@ -48,11 +54,46 @@ const transactionDocumentError = (reason: string) =>
     reason,
   });
 
+const pageVisitRequest = ({
+  endpointId,
+  headers,
+  method,
+  url,
+  body,
+}: {
+  readonly endpointId: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly method: "GET" | "POST";
+  readonly url: string;
+  readonly body?: PreparedApiRequest<string>["body"];
+}): PreparedApiRequest<string> => ({
+  endpointId,
+  family: "pageVisit",
+  authRequirement: "guest",
+  bearerToken: "secondary",
+  rateLimitBucket: "generic",
+  method,
+  url,
+  headers,
+  body: body ?? { _tag: "none" },
+  responseKind: "html",
+  decode: (value) => {
+    if (typeof value !== "string") {
+      throw transactionDocumentError("Expected an HTML document string.");
+    }
+
+    return value;
+  },
+});
+
 export class TwitterTransactionId extends ServiceMap.Service<
   TwitterTransactionId,
   {
     readonly headerFor: (
-      request: Pick<HttpClientRequest.HttpClientRequest, "method" | "url">,
+      request: {
+        readonly method: string;
+        readonly url: string;
+      },
     ) => Effect.Effect<Readonly<Record<string, string>>, TransactionIdError>;
   }
 >()("@better-twitter-scraper/TwitterTransactionId") {
@@ -73,7 +114,7 @@ export class TwitterTransactionId extends ServiceMap.Service<
     TwitterTransactionId,
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
-      const http = yield* HttpClient.HttpClient;
+      const http = yield* TwitterHttpClient;
       const cacheRef = yield* Ref.make(
         Option.none<{
           readonly document: TransactionDocument;
@@ -82,27 +123,26 @@ export class TwitterTransactionId extends ServiceMap.Service<
       );
 
       const fetchText = Effect.fn("TwitterTransactionId.fetchText")(function* (
-        endpointId: string,
-        request: HttpClientRequest.HttpClientRequest,
+        request: PreparedApiRequest<string>,
       ) {
-        const response = yield* http.execute(request).pipe(
-          Effect.mapError(mapHttpClientError),
-        );
-        const okResponse = yield* ensureSuccessStatus(endpointId, response);
-
-        return yield* okResponse.text.pipe(
-          Effect.mapError((error) =>
-            transactionDocumentError(error.message),
-          ),
-        );
+        const response = yield* http.execute(request);
+        if (typeof response.body !== "string") {
+          return yield* transactionDocumentError("Expected an HTML document string.");
+        }
+        return response.body;
       });
 
       const loadDocument = Effect.fn("TwitterTransactionId.loadDocument")(function* () {
-        const headers = navigationHeaders(config.requestProfile);
-        const homeRequest = HttpClientRequest.get("https://x.com").pipe(
-          HttpClientRequest.setHeaders(headers),
+        const headers = navigationHeaders(config.userAgent);
+        const homeHtml = yield* fetchText(
+          pageVisitRequest({
+            endpointId: "TransactionIdHome",
+            headers,
+            method: "GET",
+            url: "https://x.com",
+          }),
         );
-        const homeHtml = yield* fetchText("TransactionIdHome", homeRequest);
+
         let window = parseHTML(homeHtml);
         let document = window.document;
 
@@ -113,12 +153,13 @@ export class TwitterTransactionId extends ServiceMap.Service<
           migrationRedirectionRegex.exec(homeHtml)?.[0];
 
         if (migrationUrl) {
-          const redirectRequest = HttpClientRequest.get(migrationUrl).pipe(
-            HttpClientRequest.setHeaders(headers),
-          );
           const redirectHtml = yield* fetchText(
-            "TransactionIdMigrationRedirect",
-            redirectRequest,
+            pageVisitRequest({
+              endpointId: "TransactionIdMigrationRedirect",
+              headers,
+              method: "GET",
+              url: migrationUrl,
+            }),
           );
           window = parseHTML(redirectHtml);
           document = window.document;
@@ -129,12 +170,12 @@ export class TwitterTransactionId extends ServiceMap.Service<
           document.querySelector("form[action='https://x.com/x/migrate']");
 
         if (migrationForm) {
-          const formData = new FormData();
+          const formEntries: Record<string, string> = {};
           for (const input of migrationForm.querySelectorAll("input")) {
             const name = input.getAttribute("name");
             const value = input.getAttribute("value");
             if (name && value) {
-              formData.append(name, value);
+              formEntries[name] = value;
             }
           }
 
@@ -142,20 +183,22 @@ export class TwitterTransactionId extends ServiceMap.Service<
             migrationForm.getAttribute("action") ?? "https://x.com/x/migrate";
           const formMethod = (
             migrationForm.getAttribute("method") ?? "POST"
-          ).toUpperCase();
-          const formRequest =
-            formMethod === "POST"
-              ? HttpClientRequest.post(formUrl).pipe(
-                  HttpClientRequest.bodyFormData(formData),
-                  HttpClientRequest.setHeaders(headers),
-                )
-              : HttpClientRequest.get(formUrl).pipe(
-                  HttpClientRequest.setHeaders(headers),
-                );
-
+          ).toUpperCase() as "GET" | "POST";
           const formHtml = yield* fetchText(
-            "TransactionIdMigrationForm",
-            formRequest,
+            pageVisitRequest({
+              endpointId: "TransactionIdMigrationForm",
+              headers,
+              method: formMethod,
+              url: formUrl,
+              ...(formMethod === "POST"
+                ? {
+                    body: {
+                      _tag: "form" as const,
+                      value: formEntries,
+                    },
+                  }
+                : {}),
+            }),
           );
           window = parseHTML(formHtml);
           document = window.document;
@@ -187,7 +230,10 @@ export class TwitterTransactionId extends ServiceMap.Service<
       });
 
       const headerFor = Effect.fn("TwitterTransactionId.headerFor")(function* (
-        request: Pick<HttpClientRequest.HttpClientRequest, "method" | "url">,
+        request: {
+          readonly method: string;
+          readonly url: string;
+        },
       ) {
         const document = yield* cachedDocument();
         const url = new URL(request.url);
@@ -195,7 +241,10 @@ export class TwitterTransactionId extends ServiceMap.Service<
         const transactionId = yield* Effect.tryPromise({
           try: async () => {
             const transaction = await ClientTransaction.create(document);
-            return transaction.generateTransactionId(request.method, url.pathname);
+            return transaction.generateTransactionId(
+              request.method.toUpperCase(),
+              url.pathname,
+            );
           },
           catch: (error) =>
             transactionDocumentError(
