@@ -18,6 +18,7 @@ import {
   decodeParsedBody,
 } from "./http-client-utils";
 import { TwitterHttpClient } from "./http";
+import { RateLimiter } from "./rate-limiter";
 import { RequestAuth, type RequestAuthError } from "./request-auth";
 import {
   prepareApiRequest,
@@ -62,39 +63,88 @@ interface StrategyTransport {
   >;
 }
 
+interface StrategyRateLimiter {
+  readonly awaitReady: (
+    bucket: ApiRequest<unknown>["rateLimitBucket"],
+  ) => Effect.Effect<void>;
+  readonly noteRateLimit: (
+    error: RateLimitError,
+  ) => Effect.Effect<void>;
+  readonly noteResponse: (options: {
+    readonly bucket: ApiRequest<unknown>["rateLimitBucket"];
+    readonly headers: Readonly<Record<string, string>>;
+  }) => Effect.Effect<{
+    readonly incomingExhausted: boolean;
+  }>;
+}
+
 export const createStrategyExecute = (
   auth: StrategyRequestAuth,
   cookies: StrategyCookies,
   http: StrategyTransport,
+  rateLimiter: StrategyRateLimiter,
 ) => {
   const executeOnce = <A>(
     request: ApiRequest<A>,
   ): Effect.Effect<A, StrategyError> =>
     Effect.gen(function* () {
+      yield* rateLimiter.awaitReady(request.rateLimitBucket);
       const headers = yield* auth.headersFor(request);
       const response = yield* http.execute(prepareApiRequest(request, headers));
 
       yield* cookies.applySetCookies(response.cookies);
 
-      if (response.headers["x-rate-limit-incoming"] === "0") {
+      const limiterResult = yield* rateLimiter.noteResponse({
+        bucket: request.rateLimitBucket,
+        headers: response.headers,
+      });
+
+      if (
+        limiterResult.incomingExhausted &&
+        request.authRequirement === "guest" &&
+        request.bearerToken === "default"
+      ) {
         yield* auth.invalidate;
       }
 
       return yield* decodeParsedBody(request, response.body);
     });
 
-  return <A>(request: ApiRequest<A>): Effect.Effect<A, StrategyError> =>
+  const executeWithRetry = <A>(
+    request: ApiRequest<A>,
+    attempt = 0,
+  ): Effect.Effect<A, StrategyError> =>
     executeOnce(request).pipe(
-      Effect.catchTag("HttpStatusError", (error) =>
-        request.bearerToken === "default" && (error.status === 401 || error.status === 403)
-          ? auth.invalidate.pipe(Effect.flatMap(() => executeOnce(request)))
-          : Effect.fail(error),
-      ),
-      Effect.catchTag("HttpStatusError", (error) =>
-        Effect.fail(classifyHttpStatusError(request, error)),
-      ),
+      Effect.catchTag("HttpStatusError", (error) => {
+        if (
+          attempt === 0 &&
+          request.bearerToken === "default" &&
+          (error.status === 401 || error.status === 403)
+        ) {
+          return auth.invalidate.pipe(
+            Effect.flatMap(() => executeWithRetry(request, attempt + 1)),
+          );
+        }
+
+        const classified = classifyHttpStatusError(request, error);
+
+        if (classified._tag === "RateLimitError") {
+          return rateLimiter.noteRateLimit(classified).pipe(
+            Effect.flatMap(() =>
+              attempt === 0
+                ? executeWithRetry(request, attempt + 1)
+                : Effect.fail(classified),
+            ),
+          );
+        }
+
+        return Effect.fail(classified);
+      }),
       Effect.withSpan(`ScraperStrategy.execute.${request.endpointId}`),
     );
+
+  return <A>(request: ApiRequest<A>): Effect.Effect<A, StrategyError> =>
+    executeWithRetry(request);
 };
 
 export class ScraperStrategy extends ServiceMap.Service<
@@ -112,11 +162,12 @@ export class ScraperStrategy extends ServiceMap.Service<
         const auth = yield* RequestAuth;
         const cookies = yield* CookieManager;
         const http = yield* TwitterHttpClient;
+        const rateLimiter = yield* RateLimiter;
 
         return {
-          execute: createStrategyExecute(auth, cookies, http),
+          execute: createStrategyExecute(auth, cookies, http, rateLimiter),
         };
       }),
-    );
+    ).pipe(Layer.provideMerge(RateLimiter.liveLayer));
   }
 }

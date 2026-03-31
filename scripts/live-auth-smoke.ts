@@ -42,15 +42,18 @@ const main = async () => {
         throw new Error("Restored cookies did not produce a signed-in session.");
       }
 
-      const profiles = yield* Stream.runCollect(
+      const firstProfiles = yield* Stream.runCollect(
+        search.searchProfiles("Twitter", { limit: 2 }),
+      );
+      const secondProfiles = yield* Stream.runCollect(
         search.searchProfiles("Twitter", { limit: 2 }),
       );
 
-      if (profiles.length === 0) {
+      if (firstProfiles.length === 0 || secondProfiles.length === 0) {
         throw new Error("Authenticated profile search returned no profiles.");
       }
 
-      return profiles.map((profile) => profile.username);
+      return secondProfiles.map((profile) => profile.username);
     }).pipe(Effect.provide(liveSearchLayer)),
   );
 

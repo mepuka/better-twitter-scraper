@@ -1,5 +1,6 @@
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
+import { TestClock } from "effect/testing";
 
 import {
   CookieManager,
@@ -240,6 +241,15 @@ describe("Slice 3A guest failure classification", () => {
                     },
                     bodyText: "slow down",
                   },
+                  {
+                    status: 429,
+                    headers: {
+                      "x-rate-limit-limit": "300",
+                      "x-rate-limit-remaining": "0",
+                      "x-rate-limit-reset": "1712345678",
+                    },
+                    bodyText: "slow down",
+                  },
                 ],
             }),
           ),
@@ -349,5 +359,102 @@ describe("Slice 3A guest failure classification", () => {
       _tag: "InvalidResponseError",
       endpointId: "UserTweets",
     });
+  });
+});
+
+describe("Slice 3B guest limiter behavior", () => {
+  it("waits for the recorded reset time before reusing an exhausted guest bucket", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const publicApi = yield* TwitterPublic;
+
+          const first = yield* publicApi.getProfile("nomadic_ua");
+          expect(first.userId).toBe("106037940");
+
+          const secondFiber = yield* publicApi.getProfile("nomadic_ua").pipe(
+            Effect.forkScoped,
+          );
+
+          yield* TestClock.adjust("1999 millis");
+          expect(secondFiber.pollUnsafe()).toBeUndefined();
+
+          yield* TestClock.adjust("1 millis");
+          const second = yield* Fiber.join(secondFiber);
+
+          expect(second.userId).toBe("106037940");
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            TestClock.layer(),
+            publicTestLayer({
+              [httpRequestKey(endpointRegistry.userByScreenName("nomadic_ua"))]:
+                [
+                  {
+                    status: 200,
+                    headers: {
+                      "x-rate-limit-limit": "300",
+                      "x-rate-limit-remaining": "0",
+                      "x-rate-limit-reset": "2",
+                    },
+                    json: profileFixture,
+                  },
+                  {
+                    status: 200,
+                    json: profileFixture,
+                  },
+                ],
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
+  it("retries a 429 guest request after waiting for the reset time", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const publicApi = yield* TwitterPublic;
+
+          const profileFiber = yield* publicApi.getProfile("nomadic_ua").pipe(
+            Effect.forkScoped,
+          );
+
+          yield* TestClock.adjust("1999 millis");
+          expect(profileFiber.pollUnsafe()).toBeUndefined();
+
+          yield* TestClock.adjust("1 millis");
+          const profile = yield* Fiber.join(profileFiber);
+
+          expect(profile.userId).toBe("106037940");
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            TestClock.layer(),
+            publicTestLayer({
+              [httpRequestKey(endpointRegistry.userByScreenName("nomadic_ua"))]:
+                [
+                  {
+                    status: 429,
+                    headers: {
+                      "x-rate-limit-limit": "300",
+                      "x-rate-limit-remaining": "0",
+                      "x-rate-limit-reset": "2",
+                    },
+                    bodyText: "try again later",
+                  },
+                  {
+                    status: 200,
+                    json: profileFixture,
+                  },
+                ],
+            }),
+          ),
+        ),
+      ),
+    );
   });
 });

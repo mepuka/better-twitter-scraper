@@ -1,5 +1,6 @@
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { TestClock } from "effect/testing";
 
 import {
   CookieManager,
@@ -288,6 +289,15 @@ describe("Slice 3A authenticated failure classification", () => {
                   },
                   bodyText: "too many searches",
                 },
+                {
+                  status: 429,
+                  headers: {
+                    "x-rate-limit-limit": "50",
+                    "x-rate-limit-remaining": "0",
+                    "x-rate-limit-reset": "1712349999",
+                  },
+                  bodyText: "too many searches",
+                },
               ],
             }),
           ),
@@ -360,5 +370,54 @@ describe("Slice 3A authenticated failure classification", () => {
       _tag: "InvalidResponseError",
       endpointId: "SearchProfiles",
     });
+  });
+});
+
+describe("Slice 3B authenticated limiter behavior", () => {
+  it("uses a deterministic fallback backoff for authenticated 429 retries without a reset header", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const search = yield* TwitterSearch;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          const searchFiber = yield* Stream.runCollect(
+            search.searchProfiles("Twitter", { limit: 2 }),
+          ).pipe(Effect.forkScoped);
+
+          yield* TestClock.adjust("999 millis");
+          expect(searchFiber.pollUnsafe()).toBeUndefined();
+
+          yield* TestClock.adjust("1 millis");
+          const profiles = yield* Fiber.join(searchFiber);
+
+          expect(profiles.map((profile) => profile.username)).toEqual([
+            "twitterdev",
+            "twitterapi",
+          ]);
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            TestClock.layer(),
+            searchTestLayer({
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]:
+                [
+                  {
+                    status: 429,
+                    bodyText: "too many searches",
+                  },
+                  {
+                    status: 200,
+                    json: searchProfilesPageOneFixture,
+                  },
+                ],
+            }),
+          ),
+        ),
+      ),
+    );
   });
 });

@@ -22,6 +22,7 @@ const main = async () => {
     Effect.gen(function* () {
       const publicApi = yield* TwitterPublic;
       const profile = yield* publicApi.getProfile("nomadic_ua");
+      const repeatedProfile = yield* publicApi.getProfile("nomadic_ua");
       const tweets = yield* Stream.runCollect(
         publicApi.getTweets("XDevelopers", { limit: 3 }),
       );
@@ -30,6 +31,9 @@ const main = async () => {
         profile: {
           userId: profile.userId,
           username: profile.username,
+        },
+        repeatedProfile: {
+          userId: repeatedProfile.userId,
         },
         tweets: tweets.map((tweet) => ({
           id: tweet.id,
