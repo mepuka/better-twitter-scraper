@@ -453,6 +453,20 @@ The test harness should model these as response scripts or scenarios, not just o
 
 The team should not implement the whole surface area in parallel. This project needs staged proof points. A slice is only complete when it passes both deterministic local tests and the required live canaries for that slice.
 
+### Current implementation status (2026-03-31)
+
+- **Slice 1 is complete in the current codebase**: guest GraphQL request metadata, public profile lookup, public timeline reads, duplicate-cursor stopping, and anonymous live smokes are all implemented and passing.
+- **Slice 2 baseline is complete in the current codebase**: cookie restore, signed-in session detection, authenticated profile search, and cookie-based live auth smoke are implemented and passing.
+- **Slice 2 intentionally stopped at one authenticated endpoint**: followers / following, login automation, and DM flows are still deferred.
+- **The main gap is now resilience, not reach**: the code has a working guest path and a working authenticated path, but it still lacks a real rate limiter, full failure classification, deterministic retry timing, and first-class observability checks.
+
+The next slices should therefore use the already-working endpoints as proving ground:
+
+- guest proving endpoints: `UserByScreenName`, `UserTweets`
+- authenticated proving endpoint: `SearchProfiles`
+
+Do not widen the endpoint surface area until those existing endpoints have passed the resilience gates below.
+
 ### Slice 1 — Guest Read-Only Foundation
 
 Build:
@@ -508,32 +522,100 @@ Required gates before moving on:
 
 Do not move on until restored-cookie auth works live and anonymous access fails cleanly for at least one user-only endpoint.
 
-### Slice 3 — Resilience and Failure Classification
+### Slice 3A — Failure Classification on the Existing Surface
 
 Build:
 
-- retry classification
-- header-driven rate-limit handling
-- `x-rate-limit-incoming == '0'` proactive token reset
+- normalized retry classification on the already-working endpoints
+- `RateLimitError`
 - `BotDetectionError`
-- trace and log annotations
+- parse-drift classification that cleanly separates schema drift from transport failure
+- scripted failure scenarios in the HTTP harness, using the current guest and authenticated endpoints instead of adding new ones
 
 This slice proves:
 
-- failures are classified correctly
-- retry timing is deterministic under test
-- the strategy handles warning-header and rate-limit paths without hitting live endpoints repeatedly
+- failures are classified correctly before retry behavior is added
+- the code can tell the difference between transport problems, auth problems, rate limits, parse drift, and likely bot-detection responses
+- the current search and timeline paths are a stable enough base to build retry logic on top of
+
+Required gates before moving on:
+
+- fixture tests for 429, 401/403, warning-header, parse-drift, and bot-detection cases
+- deterministic tests proving each failure class maps to the expected tagged error
+- at least one guest endpoint and one authenticated endpoint both exercise the new classification path under script-driven tests
+
+Do not move on until failure classification is stable without introducing new endpoint families or new user-facing services.
+
+### Slice 3B — Rate Limiter and Deterministic Retry
+
+Build:
+
+- `RateLimiter`
+- header-driven rate-limit state updates per bucket
+- retry scheduling for retryable failures
+- deterministic backoff and retry timing with `TestClock`
+- `x-rate-limit-incoming == '0'` proactive token reset integrated with the limiter
+
+This slice proves:
+
+- retry behavior is explicit instead of ad hoc
+- rate-limit handling is keyed to buckets rather than scattered across call sites
+- low-level warning headers, 429s, and token invalidation all flow through one strategy path
 
 Required gates before moving on:
 
 - `TestClock` tests for retry and backoff timing
-- fixture tests for 429, 401/403, warning-header, parse-drift, and bot-detection cases
-- one low-volume live smoke test proving logs and spans include endpoint context for a guest request
-- one low-volume live smoke test proving logs and spans include endpoint context for an authenticated request
+- deterministic tests for bucket updates from response headers
+- deterministic tests for warning-header invalidation and one-shot auth refresh
+- one low-volume live guest smoke after repeated requests
+- one low-volume live authenticated smoke after repeated requests
 
-Do not move on until retry behavior and failure classification are deterministic in local tests.
+Do not move on until retry behavior is deterministic in local tests and the low-volume live canaries do not require manual babysitting.
 
-### Slice 4 — Password Login Automation and Direct Messages
+### Slice 3C — Observability Closure
+
+Build:
+
+- `Effect.withSpan` on all service methods that do real work
+- endpoint, family, bucket, and auth-mode log annotations
+- low-noise debug logging for limiter decisions and auth refresh paths
+- test hooks or assertions for emitted context
+
+This slice proves:
+
+- when Twitter/X changes behavior, we can see which endpoint and strategy path failed
+- live canaries produce enough context to debug breakage without adding ad hoc prints
+
+Required gates before moving on:
+
+- deterministic tests for span / log context on guest and authenticated requests
+- one low-volume live smoke proving endpoint context is present for a guest call
+- one low-volume live smoke proving endpoint context is present for an authenticated call
+
+Do not move on until the current guest and authenticated proving endpoints produce useful trace context.
+
+### Slice 4 — Authenticated GraphQL Expansion
+
+Build:
+
+- followers
+- following
+- any shared authenticated GraphQL pagination helpers that still feel duplicated after Slice 3
+
+This slice proves:
+
+- the authenticated GraphQL surface can widen without reopening auth or transport design
+- the same signed-in baseline used for search also works for relationship endpoints
+
+Required gates before moving on:
+
+- deterministic tests for follower / following pagination and parsing
+- one live authenticated smoke test for followers or following
+- confirmation that the new endpoints reuse the same strategy, auth, and limiter path already proven by search
+
+Do not move on until at least one relationship endpoint is proven live.
+
+### Slice 5 — Password Login Automation and Direct Messages
 
 Build:
 
@@ -564,6 +646,7 @@ Password login is not a prerequisite for earlier implementation progress. Cookie
 
 - Do not add a new endpoint family until one concrete endpoint in the current family has both deterministic coverage and a live canary.
 - Do not add a new public service until at least one real request through its full stack has passed live.
+- Use the current proving endpoints first; add resilience to `UserByScreenName`, `UserTweets`, and `SearchProfiles` before widening the feature set.
 - Do not implement `Aggressive` or `Conservative` before `Standard` has passed its guest and authenticated live canaries.
 - Do not treat password-login automation as the first authenticated milestone.
 - Treat DMs as a late-slice feature, not a foundation feature.

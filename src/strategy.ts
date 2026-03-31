@@ -7,13 +7,17 @@ import type * as Cookies from "effect/unstable/http/Cookies";
 import { CookieManager } from "./cookies";
 import { GuestAuth } from "./guest-auth";
 import {
+  AuthenticationError,
+  BotDetectionError,
   GuestTokenError,
   HttpStatusError,
   InvalidResponseError,
   ProfileNotFoundError,
+  RateLimitError,
   TransportError,
 } from "./errors";
 import {
+  classifyHttpStatusError,
   decodeJsonResponse,
   ensureSuccessStatus,
   mapHttpClientError,
@@ -21,10 +25,13 @@ import {
 import type { ApiRequest } from "./request";
 
 export type StrategyError =
+  | AuthenticationError
+  | BotDetectionError
   | GuestTokenError
   | HttpStatusError
   | InvalidResponseError
   | ProfileNotFoundError
+  | RateLimitError
   | TransportError;
 
 export interface StrategyAuth {
@@ -88,6 +95,9 @@ export const createStrategyExecute = (
         request.bearerToken === "default" && (error.status === 401 || error.status === 403)
           ? auth.invalidate.pipe(Effect.flatMap(() => executeOnce(request)))
           : Effect.fail(error),
+      ),
+      Effect.catchTag("HttpStatusError", (error) =>
+        Effect.fail(classifyHttpStatusError(request, error)),
       ),
       Effect.withSpan(`ScraperStrategy.execute.${request.endpointId}`),
     );

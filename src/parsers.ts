@@ -1,4 +1,4 @@
-import { ProfileNotFoundError } from "./errors";
+import { InvalidResponseError, ProfileNotFoundError } from "./errors";
 import type { Profile, TimelinePage, Tweet } from "./models";
 
 interface UrlEntityRaw {
@@ -419,8 +419,13 @@ export const parseSearchProfilesResponse = (
 ): TimelinePage<Profile> => {
   const response = body as SearchTimelineResponse;
   const instructions =
-    response.data?.search_by_raw_query?.search_timeline?.timeline?.instructions ??
-    [];
+    response.data?.search_by_raw_query?.search_timeline?.timeline?.instructions;
+  if (!instructions) {
+    throw new InvalidResponseError({
+      endpointId: "SearchProfiles",
+      reason: "Missing search timeline instructions in Twitter response",
+    });
+  }
 
   let nextCursor: string | undefined;
   let previousCursor: string | undefined;
@@ -483,10 +488,10 @@ export const parseTimelinePageResponse = (body: unknown): TimelinePage<Tweet> =>
   const instructions =
     response.data?.user?.result?.timeline?.timeline?.instructions;
   if (!instructions) {
-    return {
-      items: [],
-      status: "at_end",
-    };
+    throw new InvalidResponseError({
+      endpointId: "UserTweets",
+      reason: "Missing timeline instructions in Twitter response",
+    });
   }
 
   let nextCursor: string | undefined;

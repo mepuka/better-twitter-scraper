@@ -44,6 +44,11 @@ const searchTestLayer = (
     Layer.provideMerge(TwitterConfig.layer),
   );
 
+const restoredSessionCookies = [
+  "ct0=csrf-token; Path=/; Domain=x.com",
+  "auth_token=session-token; Path=/; Domain=x.com; HttpOnly",
+] as const;
+
 describe("Slice 2 authenticated session", () => {
   it("restores a logged-in session from serialized cookies", async () => {
     await Effect.runPromise(
@@ -52,10 +57,7 @@ describe("Slice 2 authenticated session", () => {
 
         expect(yield* auth.isLoggedIn()).toBe(false);
 
-        yield* auth.restoreCookies([
-          "ct0=csrf-token; Path=/; Domain=x.com",
-          "auth_token=session-token; Path=/; Domain=x.com; HttpOnly",
-        ]);
+        yield* auth.restoreCookies(restoredSessionCookies);
 
         const serializedCookies = yield* auth.serializeCookies;
 
@@ -72,10 +74,7 @@ describe("Slice 2 authenticated session", () => {
       Effect.gen(function* () {
         const auth = yield* UserAuth;
 
-        yield* auth.restoreCookies([
-          "ct0=csrf-token; Path=/; Domain=x.com",
-          "auth_token=session-token; Path=/; Domain=x.com; HttpOnly",
-        ]);
+        yield* auth.restoreCookies(restoredSessionCookies);
 
         const headers = yield* auth.headersFor({
           family: "graphql",
@@ -253,10 +252,7 @@ describe("Slice 2 authenticated search", () => {
         const auth = yield* UserAuth;
         const search = yield* TwitterSearch;
 
-        yield* auth.restoreCookies([
-          "ct0=csrf-token; Path=/; Domain=x.com",
-          "auth_token=session-token; Path=/; Domain=x.com; HttpOnly",
-        ]);
+        yield* auth.restoreCookies(restoredSessionCookies);
 
         const profiles = yield* Stream.runCollect(
           search.searchProfiles("Twitter", { limit: 3 }),
@@ -284,5 +280,136 @@ describe("Slice 2 authenticated search", () => {
         ),
       ),
     );
+  });
+});
+
+describe("Slice 3A authenticated failure classification", () => {
+  it("maps 401 search failures to AuthenticationError", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const search = yield* TwitterSearch;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          return yield* Stream.runCollect(
+            search.searchProfiles("Twitter", { limit: 2 }),
+          );
+        }).pipe(
+          Effect.provide(
+            searchTestLayer({
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2).request)]:
+                [{ status: 401, bodyText: "not logged in" }],
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "AuthenticationError",
+      reason:
+        "SearchProfiles rejected the restored authenticated session with HTTP 401.",
+    });
+  });
+
+  it("maps search rate limits to RateLimitError", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const search = yield* TwitterSearch;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          return yield* Stream.runCollect(
+            search.searchProfiles("Twitter", { limit: 2 }),
+          );
+        }).pipe(
+          Effect.provide(
+            searchTestLayer({
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2).request)]:
+                [
+                  {
+                    status: 429,
+                    headers: {
+                      "x-rate-limit-limit": "180",
+                      "x-rate-limit-remaining": "0",
+                      "x-rate-limit-reset": "1712349999",
+                    },
+                    bodyText: "search capped",
+                  },
+                ],
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "RateLimitError",
+      endpointId: "SearchProfiles",
+      bucket: "searchProfiles",
+      status: 429,
+      body: "search capped",
+      limit: 180,
+      remaining: 0,
+      reset: 1712349999,
+    });
+  });
+
+  it("maps blank GraphQL 404 search failures to BotDetectionError", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const search = yield* TwitterSearch;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          return yield* Stream.runCollect(
+            search.searchProfiles("Twitter", { limit: 2 }),
+          );
+        }).pipe(
+          Effect.provide(
+            searchTestLayer({
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2).request)]:
+                [{ status: 404, bodyText: "" }],
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "BotDetectionError",
+      endpointId: "SearchProfiles",
+      status: 404,
+      body: "",
+      reason: "empty_404",
+    });
+  });
+
+  it("treats drifted authenticated search payloads as InvalidResponseError", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const search = yield* TwitterSearch;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          return yield* Stream.runCollect(
+            search.searchProfiles("Twitter", { limit: 2 }),
+          );
+        }).pipe(
+          Effect.provide(
+            searchTestLayer({
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2).request)]:
+                [{ status: 200, json: {} }],
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "InvalidResponseError",
+      endpointId: "SearchProfiles",
+      reason: "Missing search timeline instructions in Twitter response",
+    });
   });
 });
