@@ -2,7 +2,7 @@ import { Effect, Layer, Ref, Stream } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   CookieManager,
@@ -17,6 +17,7 @@ import {
 import type { HttpScript } from "../src/http";
 import { createStrategyExecute } from "../src/strategy";
 import { TwitterTransactionId } from "../src/transaction-id";
+import * as WebCrypto from "../src/web-crypto";
 import { TwitterXpff } from "../src/xpff";
 import {
   searchProfilesPageOneFixture,
@@ -172,6 +173,63 @@ describe("Slice 2 authenticated search", () => {
         ),
       ),
     );
+  });
+
+  it("omits an xpff header when no guest id cookie is present", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const xpff = yield* TwitterXpff;
+        const headers = yield* xpff.headerFor();
+
+        expect(headers).toEqual({});
+      }).pipe(
+        Effect.provide(
+          TwitterXpff.liveLayer.pipe(
+            Layer.provideMerge(CookieManager.testLayer()),
+          ),
+        ),
+      ),
+    );
+  });
+
+  it("maps crypto helper failures to an xpff invalid response error", async () => {
+    const randomBytesSpy = vi
+      .spyOn(WebCrypto, "randomBytes")
+      .mockReturnValue(
+        Effect.fail(
+          new WebCrypto.CryptoOperationError({
+            operation: "randomBytes",
+            reason: "xpff entropy failed",
+          }),
+        ),
+      );
+
+    try {
+      await expect(
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const xpff = yield* TwitterXpff;
+            return yield* xpff.headerFor();
+          }).pipe(
+            Effect.provide(
+              TwitterXpff.liveLayer.pipe(
+                Layer.provideMerge(
+                  CookieManager.testLayer({
+                    guest_id: "v1%3A123456789012345678",
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ).rejects.toMatchObject({
+        _tag: "InvalidResponseError",
+        endpointId: "XpffHeader",
+        reason: "xpff entropy failed",
+      });
+    } finally {
+      randomBytesSpy.mockRestore();
+    }
   });
 
   it("rejects profile search when no authenticated session is restored", async () => {

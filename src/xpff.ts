@@ -3,29 +3,17 @@ import { Effect, Layer, ServiceMap } from "effect";
 import { CHROME_USER_AGENT } from "./chrome-fingerprint";
 import { CookieManager } from "./cookies";
 import { InvalidResponseError } from "./errors";
+import {
+  encryptAesGcm,
+  hexEncode,
+  importAesGcmKey,
+  randomBytes,
+  sha256,
+  utf8Bytes,
+} from "./web-crypto";
 
 const XPFF_BASE_KEY =
   "0e6be1f1e21ffc33590b888fd4dc81b19713e570e805d4e5df80a493c9571a05";
-
-const toHex = (bytes: Uint8Array) =>
-  [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-
-const sha256 = (message: string) =>
-  Effect.tryPromise({
-    try: async () => {
-      const encoded = new TextEncoder().encode(message);
-      const digest = await crypto.subtle.digest("SHA-256", encoded);
-      return new Uint8Array(digest);
-    },
-    catch: (error) =>
-      new InvalidResponseError({
-        endpointId: "XpffHeader",
-        reason:
-          error instanceof Error
-            ? error.message
-            : "Failed to derive the XPFF encryption key.",
-      }),
-  });
 
 const xpffPlaintext = () =>
   JSON.stringify({
@@ -39,48 +27,29 @@ const xpffPlaintext = () =>
 
 const generateXpffHeader = (guestId: string) =>
   Effect.gen(function* () {
-    const key = yield* sha256(`${XPFF_BASE_KEY}${guestId}`);
-    const nonce = crypto.getRandomValues(new Uint8Array(12));
-    const cipher = yield* Effect.tryPromise({
-      try: () =>
-        crypto.subtle.importKey("raw", key, { name: "AES-GCM" }, false, [
-          "encrypt",
-        ]),
-      catch: (error) =>
-        new InvalidResponseError({
-          endpointId: "XpffHeader",
-          reason:
-            error instanceof Error
-              ? error.message
-              : "Failed to create the XPFF cipher.",
-        }),
-    });
-    const encrypted = yield* Effect.tryPromise({
-      try: () =>
-        crypto.subtle.encrypt(
-          {
-            name: "AES-GCM",
-            iv: nonce,
-          },
-          cipher,
-          new TextEncoder().encode(xpffPlaintext()),
-        ),
-      catch: (error) =>
-        new InvalidResponseError({
-          endpointId: "XpffHeader",
-          reason:
-            error instanceof Error
-              ? error.message
-              : "Failed to encrypt the XPFF payload.",
-        }),
+    const key = yield* sha256(utf8Bytes(`${XPFF_BASE_KEY}${guestId}`));
+    const nonce = yield* randomBytes(12);
+    const cipher = yield* importAesGcmKey(key, ["encrypt"]);
+    const encrypted = yield* encryptAesGcm({
+      key: cipher,
+      iv: nonce,
+      plaintext: utf8Bytes(xpffPlaintext()),
     });
 
-    const combined = new Uint8Array(nonce.length + encrypted.byteLength);
+    const combined = new Uint8Array(nonce.length + encrypted.length);
     combined.set(nonce);
-    combined.set(new Uint8Array(encrypted), nonce.length);
+    combined.set(encrypted, nonce.length);
 
-    return toHex(combined);
-  });
+    return hexEncode(combined);
+  }).pipe(
+    Effect.mapError(
+      (error) =>
+        new InvalidResponseError({
+          endpointId: "XpffHeader",
+          reason: error.reason,
+        }),
+    ),
+  );
 
 export class TwitterXpff extends ServiceMap.Service<
   TwitterXpff,
