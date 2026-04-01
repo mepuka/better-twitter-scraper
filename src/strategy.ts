@@ -219,8 +219,39 @@ export const createStrategyExecute = (
       }),
     );
 
+  const executeWithFallback = <A>(
+    request: ApiRequest<A>,
+  ): Effect.Effect<A, StrategyError> => {
+    // If the request already requires guest auth, or no guest auth is available,
+    // just run normally — no fallback possible
+    if (request.authRequirement === "guest" || Option.isNone(auth.guest)) {
+      return executeWithRetry(request);
+    }
+
+    return executeWithRetry(request).pipe(
+      Effect.catchTag("RateLimitError", (error) => {
+        // On rate limit with user auth, try guest auth as fallback
+        const guestRequest = { ...request, authRequirement: "guest" as const };
+        return logDebugDecision("Falling back to guest auth after user rate limit", {
+          bucket: error.bucket,
+        }).pipe(
+          Effect.andThen(() => executeWithRetry(guestRequest)),
+        );
+      }),
+      Effect.catchTag("AuthenticationError", (error) => {
+        // On auth failure, try guest auth as fallback
+        const guestRequest = { ...request, authRequirement: "guest" as const };
+        return logDebugDecision("Falling back to guest auth after authentication failure", {
+          reason: error.reason,
+        }).pipe(
+          Effect.andThen(() => executeWithRetry(guestRequest)),
+        );
+      }),
+    );
+  };
+
   return <A>(request: ApiRequest<A>): Effect.Effect<A, StrategyError> =>
-    executeWithRetry(request);
+    executeWithFallback(request);
 };
 
 export class ScraperStrategy extends ServiceMap.Service<
