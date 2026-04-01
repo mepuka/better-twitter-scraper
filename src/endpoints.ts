@@ -18,11 +18,48 @@ import type { ApiRequest } from "./request";
 import type { TweetDetailDocument } from "./tweet-detail-model";
 
 interface EndpointTemplate {
-  readonly url: string;
   readonly variables?: Record<string, unknown>;
   readonly features?: Record<string, unknown>;
   readonly fieldToggles?: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------------------
+// Mutable query-ID map — initialized with hardcoded fallbacks, updatable at
+// runtime via `updateQueryIds()` after endpoint auto-discovery.
+// ---------------------------------------------------------------------------
+
+const queryIds = new Map<string, string>([
+  ["UserByScreenName", "AWbeRIdkLtqTRN7yL_H8yw"],
+  ["UserTweets", "N2tFDY-MlrLxXJ9F_ZxJGA"],
+  ["ListLatestTweetsTimeline", "Uv3buKIUElzL3Iuc0L0O5g"],
+  ["SearchTimeline", "ML-n2SfAxx5S_9QMqNejbg"],
+  ["UserTweetsAndReplies", "2NDLUdBmT_IB5uGwZ3tHRg"],
+  ["Likes", "Pcw-j9lrSeDMmkgnIejJiQ"],
+  ["Followers", "P7m4Qr-rJEB8KUluOenU6A"],
+  ["Following", "T5wihsMTYHncY7BB4YxHSg"],
+  ["TweetDetail", "YCNdW_ZytXfV9YR3cJK9kw"],
+  ["HomeTimeline", "HJFjzBgCs16TqxewQOeLNg"],
+  ["TweetResultByRestId", "4PdbzTmQ5PTjz9RiureISQ"],
+]);
+
+/**
+ * Replace active query IDs with freshly discovered values.
+ * Only updates entries whose operation name already exists in the map
+ * so that we don't accidentally add unknown endpoints.
+ */
+export const updateQueryIds = (discovered: ReadonlyMap<string, string>) => {
+  for (const [name, id] of discovered) {
+    if (queryIds.has(name)) {
+      queryIds.set(name, id);
+    }
+  }
+};
+
+/** Read-only snapshot of the current query-ID map (useful for testing/logging). */
+export const getQueryIds = (): ReadonlyMap<string, string> => new Map(queryIds);
+
+const graphqlBaseUrl = (operationName: string) =>
+  `https://api.x.com/graphql/${queryIds.get(operationName)}/${operationName}`;
 
 const authenticatedProfilesTimelineFeatures = {
   rweb_video_screen_enabled: false,
@@ -64,7 +101,6 @@ const authenticatedProfilesTimelineFeatures = {
 
 const endpointTemplates = {
   userByScreenName: {
-    url: "https://api.x.com/graphql/AWbeRIdkLtqTRN7yL_H8yw/UserByScreenName",
     variables: {
       screen_name: "elonmusk",
       withGrokTranslatedBio: true,
@@ -90,7 +126,6 @@ const endpointTemplates = {
     },
   },
   userTweets: {
-    url: "https://api.x.com/graphql/N2tFDY-MlrLxXJ9F_ZxJGA/UserTweets",
     variables: {
       userId: "44196397",
       count: 20,
@@ -140,7 +175,6 @@ const endpointTemplates = {
     },
   },
   listTweets: {
-    url: "https://api.x.com/graphql/Uv3buKIUElzL3Iuc0L0O5g/ListLatestTweetsTimeline",
     variables: {
       listId: "1736495155002106192",
       count: 20,
@@ -148,7 +182,6 @@ const endpointTemplates = {
     features: authenticatedProfilesTimelineFeatures,
   },
   searchTimeline: {
-    url: "https://api.x.com/graphql/ML-n2SfAxx5S_9QMqNejbg/SearchTimeline",
     variables: {
       rawQuery: "twitter",
       count: 20,
@@ -159,7 +192,6 @@ const endpointTemplates = {
     features: authenticatedProfilesTimelineFeatures,
   },
   userTweetsAndReplies: {
-    url: "https://api.x.com/graphql/2NDLUdBmT_IB5uGwZ3tHRg/UserTweetsAndReplies",
     variables: {
       userId: "1806359170830172162",
       count: 20,
@@ -173,7 +205,6 @@ const endpointTemplates = {
     },
   },
   likes: {
-    url: "https://api.x.com/graphql/Pcw-j9lrSeDMmkgnIejJiQ/Likes",
     variables: {
       userId: "2244196397",
       count: 20,
@@ -188,7 +219,6 @@ const endpointTemplates = {
     },
   },
   followers: {
-    url: "https://api.x.com/graphql/P7m4Qr-rJEB8KUluOenU6A/Followers",
     variables: {
       userId: "1806359170830172162",
       count: 20,
@@ -198,7 +228,6 @@ const endpointTemplates = {
     features: authenticatedProfilesTimelineFeatures,
   },
   following: {
-    url: "https://api.x.com/graphql/T5wihsMTYHncY7BB4YxHSg/Following",
     variables: {
       userId: "1806359170830172162",
       count: 20,
@@ -208,7 +237,6 @@ const endpointTemplates = {
     features: authenticatedProfilesTimelineFeatures,
   },
   homeTimeline: {
-    url: "https://api.x.com/graphql/HJFjzBgCs16TqxewQOeLNg/HomeTimeline",
     variables: {
       count: 20,
       includePromotedContent: true,
@@ -222,7 +250,6 @@ const endpointTemplates = {
     },
   },
   tweetResultByRestId: {
-    url: "https://api.x.com/graphql/4PdbzTmQ5PTjz9RiureISQ/TweetResultByRestId",
     variables: {
       tweetId: "1985465713096794294",
       includePromotedContent: true,
@@ -237,7 +264,6 @@ const endpointTemplates = {
     },
   },
   tweetDetail: {
-    url: "https://api.x.com/graphql/YCNdW_ZytXfV9YR3cJK9kw/TweetDetail",
     variables: {
       focalTweetId: "1985465713096794294",
       with_rux_injections: false,
@@ -339,6 +365,7 @@ const searchProductForMode = (mode: TweetSearchMode) => {
 };
 
 const buildUrl = (
+  operationName: string,
   template: EndpointTemplate,
   overrides: {
     readonly fieldToggles?: Record<string, unknown>;
@@ -364,7 +391,7 @@ const buildUrl = (
     params.set("fieldToggles", stableJson(fieldToggles));
   }
 
-  return `${template.url}?${params.toString()}`;
+  return `${graphqlBaseUrl(operationName)}?${params.toString()}`;
 };
 
 export const endpointRegistry = {
@@ -394,7 +421,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "profileLookup",
       method: "GET",
-      url: buildUrl(endpointTemplates.userByScreenName, {
+      url: buildUrl("UserByScreenName", endpointTemplates.userByScreenName, {
         variables: {
           ...endpointTemplates.userByScreenName.variables,
           screen_name: username,
@@ -418,7 +445,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "userTweets",
       method: "GET",
-      url: buildUrl(endpointTemplates.userTweets, {
+      url: buildUrl("UserTweets", endpointTemplates.userTweets, {
         variables: {
           ...endpointTemplates.userTweets.variables,
           userId,
@@ -444,7 +471,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "listTweets",
       method: "GET",
-      url: buildUrl(endpointTemplates.listTweets, {
+      url: buildUrl("ListLatestTweetsTimeline", endpointTemplates.listTweets, {
         variables: {
           ...endpointTemplates.listTweets.variables,
           listId,
@@ -469,7 +496,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "searchProfiles",
       method: "GET",
-      url: buildUrl(endpointTemplates.searchTimeline, {
+      url: buildUrl("SearchTimeline", endpointTemplates.searchTimeline, {
         variables: {
           ...endpointTemplates.searchTimeline.variables,
           rawQuery: query,
@@ -496,7 +523,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "searchTweets",
       method: "GET",
-      url: buildUrl(endpointTemplates.searchTimeline, {
+      url: buildUrl("SearchTimeline", endpointTemplates.searchTimeline, {
         variables: {
           ...endpointTemplates.searchTimeline.variables,
           rawQuery: query,
@@ -522,7 +549,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "followers",
       method: "GET",
-      url: buildUrl(endpointTemplates.followers, {
+      url: buildUrl("Followers", endpointTemplates.followers, {
         variables: {
           ...endpointTemplates.followers.variables,
           userId,
@@ -547,7 +574,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "following",
       method: "GET",
-      url: buildUrl(endpointTemplates.following, {
+      url: buildUrl("Following", endpointTemplates.following, {
         variables: {
           ...endpointTemplates.following.variables,
           userId,
@@ -572,7 +599,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "tweetsAndReplies",
       method: "GET",
-      url: buildUrl(endpointTemplates.userTweetsAndReplies, {
+      url: buildUrl("UserTweetsAndReplies", endpointTemplates.userTweetsAndReplies, {
         variables: {
           ...endpointTemplates.userTweetsAndReplies.variables,
           userId,
@@ -599,7 +626,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "likedTweets",
       method: "GET",
-      url: buildUrl(endpointTemplates.likes, {
+      url: buildUrl("Likes", endpointTemplates.likes, {
         variables: {
           ...endpointTemplates.likes.variables,
           userId,
@@ -624,7 +651,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "homeTimeline",
       method: "GET",
-      url: buildUrl(endpointTemplates.homeTimeline, {
+      url: buildUrl("HomeTimeline", endpointTemplates.homeTimeline, {
         variables: {
           ...endpointTemplates.homeTimeline.variables,
           count,
@@ -644,7 +671,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "tweetResultByRestId",
       method: "GET",
-      url: buildUrl(endpointTemplates.tweetResultByRestId, {
+      url: buildUrl("TweetResultByRestId", endpointTemplates.tweetResultByRestId, {
         variables: {
           ...endpointTemplates.tweetResultByRestId.variables,
           tweetId: id,
@@ -663,7 +690,7 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "tweetDetail",
       method: "GET",
-      url: buildUrl(endpointTemplates.tweetDetail, {
+      url: buildUrl("TweetDetail", endpointTemplates.tweetDetail, {
         variables: {
           ...endpointTemplates.tweetDetail.variables,
           focalTweetId: id,

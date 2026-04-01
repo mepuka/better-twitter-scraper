@@ -1,5 +1,7 @@
 export { CookieManager } from "./src/cookies";
 export { TwitterConfig } from "./src/config";
+export { TwitterEndpointDiscovery } from "./src/endpoint-discovery";
+export { updateQueryIds, getQueryIds } from "./src/endpoints";
 export { GuestAuth } from "./src/guest-auth";
 export { TwitterHttpClient } from "./src/http";
 export type { HttpScript, ScriptedHttpResponse } from "./src/http";
