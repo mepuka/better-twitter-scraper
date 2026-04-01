@@ -2,6 +2,7 @@ import { Effect, Layer, ServiceMap } from "effect";
 
 import { CookieManager, type CookieStoreInstance, type SerializedCookie } from "./cookies";
 import { TwitterConfig, type TwitterConfigShape } from "./config";
+import { AuthenticationError } from "./errors";
 import { buildBaseHeaders } from "./header-policy";
 import { type RequestAuthHelper, UserRequestAuth } from "./request-auth";
 import { TwitterTransactionId } from "./transaction-id";
@@ -58,8 +59,15 @@ export const createUserRequestAuthInstance = (deps: {
 
     return {
       headersFor: Effect.fn("UserRequestAuth.headersFor")(function* (request) {
-        const cookieHeader = yield* cookies.getCookieHeader;
         const csrfToken = yield* cookies.get("ct0");
+        const authToken = yield* cookies.get("auth_token");
+        if (!csrfToken || !authToken) {
+          return yield* new AuthenticationError({
+            reason: `${request.endpointId} requires an authenticated session, but session cookies are missing or expired.`,
+          });
+        }
+
+        const cookieHeader = yield* cookies.getCookieHeader;
         const baseHeaders = buildBaseHeaders({
           config,
           request,

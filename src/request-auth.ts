@@ -1,6 +1,7 @@
 import { Effect, ServiceMap } from "effect";
 
 import {
+  AuthenticationError,
   GuestTokenError,
   HttpStatusError,
   InvalidResponseError,
@@ -9,6 +10,7 @@ import {
 import type { ApiRequest } from "./request";
 
 export type RequestAuthError =
+  | AuthenticationError
   | GuestTokenError
   | HttpStatusError
   | InvalidResponseError
