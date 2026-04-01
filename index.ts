@@ -1,3 +1,9 @@
+export { AuthPool } from "./src/auth-pool";
+export type {
+  SelectedSession,
+  SessionRateLimitState,
+  SessionSnapshot,
+} from "./src/auth-pool";
 export { CookieManager } from "./src/cookies";
 export { TwitterConfig } from "./src/config";
 export { TwitterEndpointDiscovery } from "./src/endpoint-discovery";
