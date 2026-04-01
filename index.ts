@@ -12,6 +12,7 @@ export type {
   Tweet,
   TweetSearchMode,
 } from "./src/models";
+export { TwitterLists } from "./src/lists";
 export { TwitterPublic } from "./src/public";
 export { TwitterRelationships } from "./src/relationships";
 export { ScraperStrategy } from "./src/strategy";
@@ -19,6 +20,7 @@ export type { StrategyError } from "./src/strategy";
 export { TwitterSearch } from "./src/search";
 export { TwitterTrends } from "./src/trends";
 export {
+  TweetConversationProjection,
   TweetDetailDocument,
   TweetDetailNode,
   TweetNodeResolution,
@@ -29,10 +31,13 @@ export {
   TweetVideo,
 } from "./src/tweet-detail-model";
 export {
+  getConversationProjection,
+  getConversationRoot,
   getDirectReplies,
   getFocalTweet,
   getParentTweet,
   getQuotedTweet,
+  getReplyChain,
   getReplyTree,
   getRetweetedTweet,
   getSelfThread,

@@ -2,6 +2,7 @@ import * as Graph from "effect/Graph";
 import * as Option from "effect/Option";
 
 import type {
+  TweetConversationProjection,
   TweetDetailDocument,
   TweetDetailNode,
   TweetRelationKind,
@@ -123,6 +124,29 @@ const orderedNodes = (
     });
 };
 
+const nodesInInputOrder = (
+  document: TweetDetailDocument,
+  tweetIds: Iterable<string>,
+  options: {
+    readonly fullOnly?: boolean;
+  } = {},
+): readonly TweetDetailNode[] => {
+  const index = getIndex(document);
+
+  return [...new Set(tweetIds)].flatMap((tweetId) => {
+    const node = index.nodeById.get(tweetId);
+    if (!node) {
+      return [];
+    }
+
+    if (options.fullOnly && node.resolution !== "full") {
+      return [];
+    }
+
+    return [node];
+  });
+};
+
 const relatedTweetIds = (
   document: TweetDetailDocument,
   tweetId: string,
@@ -193,6 +217,30 @@ export const getRetweetedTweet = (
   tweetId?: string,
 ): TweetDetailNode | undefined =>
   relatedTweet(document, resolveTweetId(document, tweetId), "outgoing", "retweets");
+
+export const getReplyChain = (
+  document: TweetDetailDocument,
+  tweetId?: string,
+): readonly TweetDetailNode[] => {
+  const chain = new Array<string>();
+  const visited = new Set<string>();
+  let currentTweetId: string | undefined = resolveTweetId(document, tweetId);
+
+  while (currentTweetId && !visited.has(currentTweetId)) {
+    visited.add(currentTweetId);
+    chain.push(currentTweetId);
+    currentTweetId = getParentTweet(document, currentTweetId)?.id;
+  }
+
+  return nodesInInputOrder(document, chain.reverse());
+};
+
+export const getConversationRoot = (
+  document: TweetDetailDocument,
+  tweetId?: string,
+): TweetDetailNode | undefined =>
+  getReplyChain(document, tweetId)[0] ??
+  getNode(document, resolveTweetId(document, tweetId));
 
 export const getSelfThread = (
   document: TweetDetailDocument,
@@ -272,3 +320,33 @@ export const getReplyTree = (
   tweetId?: string,
 ): TweetReplyTreeNode | undefined =>
   buildReplyTree(document, resolveTweetId(document, tweetId), new Set());
+
+export const getConversationProjection = (
+  document: TweetDetailDocument,
+  tweetId?: string,
+): TweetConversationProjection | undefined => {
+  const resolvedTweetId = resolveTweetId(document, tweetId);
+  const tweet = getNode(document, resolvedTweetId);
+
+  if (!tweet) {
+    return undefined;
+  }
+
+  const replyChain = getReplyChain(document, resolvedTweetId);
+  const parentTweet = getParentTweet(document, resolvedTweetId);
+  const quotedTweet = getQuotedTweet(document, resolvedTweetId);
+  const retweetedTweet = getRetweetedTweet(document, resolvedTweetId);
+  const replyTree = getReplyTree(document, resolvedTweetId);
+
+  return {
+    conversationRoot: replyChain[0] ?? tweet,
+    directReplies: getDirectReplies(document, resolvedTweetId),
+    replyChain,
+    selfThread: getSelfThread(document, resolvedTweetId),
+    tweet,
+    ...(parentTweet ? { parentTweet } : {}),
+    ...(quotedTweet ? { quotedTweet } : {}),
+    ...(retweetedTweet ? { retweetedTweet } : {}),
+    ...(replyTree ? { replyTree } : {}),
+  };
+};

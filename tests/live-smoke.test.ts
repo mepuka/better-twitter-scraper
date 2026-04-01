@@ -101,6 +101,7 @@ describe("Live guest smoke", () => {
         ]),
       );
     }, 30_000);
+
   } else {
     it.skip("loads a public profile anonymously", () => {});
     it.skip("loads a public tweet timeline anonymously", () => {});
@@ -320,17 +321,21 @@ describe("Live authenticated smoke", () => {
       });
 
       const payload = JSON.parse(stdout) as {
+        readonly conversationRootId: string;
         readonly observability: {
           readonly strategyCalls: ReadonlyArray<{
             readonly authMode: string;
             readonly endpointId: string;
           }>;
         };
+        readonly replyChainIds: readonly string[];
         readonly threadIds: readonly string[];
       };
 
       expect(payload.threadIds.length).toBeGreaterThan(1);
       expect(payload.threadIds[0]).toBe("1665602315745673217");
+      expect(payload.conversationRootId).toBe("1665602315745673217");
+      expect(payload.replyChainIds).toEqual(["1665602315745673217"]);
       expect(payload.observability.strategyCalls).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -377,6 +382,48 @@ describe("Live authenticated smoke", () => {
         expect.arrayContaining([
           expect.objectContaining({
             endpointId: "SearchTweets",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
+
+    it("loads list timelines with restored cookies", async () => {
+      const result = spawnSync("bun", ["scripts/live-list-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly tweets: ReadonlyArray<{
+          readonly id?: string;
+        }>;
+      };
+
+      expect(payload.tweets.length).toBeGreaterThan(0);
+      expect(payload.tweets[0]?.id).toBeTruthy();
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "ListTweets",
             authMode: "user",
           }),
         ]),
@@ -518,6 +565,7 @@ describe("Live authenticated smoke", () => {
     it.skip("loads authenticated tweet detail for a thread canary", () => {});
     it.skip("projects a root-first thread through the convenience tweet thread API", () => {});
     it.skip("searches tweets with restored cookies", () => {});
+    it.skip("loads list timelines with restored cookies", () => {});
     it.skip("loads tweets-and-replies with restored cookies", () => {});
     it.skip("loads trends with restored cookies", () => {});
     it.skip("loads liked tweets when a likes canary user id is configured", () => {});

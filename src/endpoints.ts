@@ -2,6 +2,7 @@ import type { Profile, TimelinePage, Tweet, TweetSearchMode } from "./models";
 import {
   parseFollowersPageResponse,
   parseFollowingPageResponse,
+  parseListTweetsPageResponse,
   parseProfileResponse,
   parseSearchProfilesResponse,
   parseSearchTweetsResponse,
@@ -136,6 +137,14 @@ const endpointTemplates = {
       withArticlePlainText: false,
     },
   },
+  listTweets: {
+    url: "https://api.x.com/graphql/Uv3buKIUElzL3Iuc0L0O5g/ListLatestTweetsTimeline",
+    variables: {
+      listId: "1736495155002106192",
+      count: 20,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+  },
   searchTimeline: {
     url: "https://api.x.com/graphql/ML-n2SfAxx5S_9QMqNejbg/SearchTimeline",
     variables: {
@@ -238,6 +247,7 @@ const normalizeForJson = (value: unknown): unknown => {
 const stableJson = (value: unknown) => JSON.stringify(normalizeForJson(value));
 
 const relationshipCount = (count: number) => Math.min(count, 50);
+const listTweetsCount = (count: number) => Math.min(count, 200);
 const searchCount = (count: number) => Math.min(count, 50);
 const tweetsAndRepliesCount = (count: number) => Math.min(count, 40);
 const likedTweetsCount = (count: number) => Math.min(count, 200);
@@ -388,6 +398,31 @@ export const endpointRegistry = {
       }),
       responseKind: "json",
       decode: parseTimelinePageResponse,
+    };
+  },
+
+  listTweets(
+    listId: string,
+    count: number,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Tweet>> {
+    return {
+      endpointId: "ListTweets",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "listTweets",
+      method: "GET",
+      url: buildUrl(endpointTemplates.listTweets, {
+        variables: {
+          ...endpointTemplates.listTweets.variables,
+          listId,
+          count: listTweetsCount(count),
+          cursor,
+        },
+      }),
+      responseKind: "json",
+      decode: parseListTweetsPageResponse,
     };
   },
 

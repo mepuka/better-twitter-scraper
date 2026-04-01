@@ -699,11 +699,32 @@ This slice proves:
 Status:
 
 - `TweetDetailNode` now distinguishes `resolution: "full" | "reference"`, so relation-only placeholders are explicit instead of being indistinguishable from fully observed tweets.
-- Pure projection helpers now ship for focal tweet lookup, parent / quote / retweet resolution, self-thread reconstruction, direct replies, and reply-tree projection.
+- Pure projection helpers now ship for focal tweet lookup, conversation root lookup, reply-chain reconstruction, parent / quote / retweet resolution, self-thread reconstruction, direct replies, reply-tree projection, and a bundled conversation projection view.
 - `TwitterTweets.getThread(id)` is implemented as a thin authenticated wrapper over `getTweet(id)` and the pure self-thread projection.
-- Deterministic tests now cover placeholder promotion, projection ordering, cycle resistance, and `getThread(id)` behavior.
-- Live proof now asserts root-first thread projection on the existing authenticated thread canary and also proves the `getThread(id)` convenience path.
+- Deterministic tests now cover placeholder promotion, reply-chain and conversation-root projection, ordering, cycle resistance, bundled conversation context, and `getThread(id)` behavior.
+- Live proof now asserts root-first thread projection on the existing authenticated thread canary, verifies the conversation root and reply-chain semantics, and also proves the `getThread(id)` convenience path.
 - Bookmarks discovery did **not** pass the implementation gate in the current codebase. The live signed-in X client currently exposes bookmark-related GraphQL metadata through a dynamic `BookmarkSearchTimeline` operation in client JavaScript, and direct requests using the discovered query id still reject with `400` without page-captured request shape. That means bookmarks would currently require page-level query-id / request-shape discovery beyond the stable signed-in GraphQL path already proven by search, relationships, tweet detail, and signed-in timelines. No public `TwitterBookmarks` service should ship until that discovery path is designed explicitly.
+
+### Slice 4E — Signed-In List Timelines
+
+Build:
+
+- `TwitterLists.getTweets(listId, options)` as a signed-in stream over list timelines
+- one typed `ListLatestTweetsTimeline` endpoint descriptor on the existing GraphQL path
+- one list-specific parser wrapper on top of the shared tweet-timeline parser
+
+This slice proves:
+
+- list timelines fit the existing signed-in read architecture without adding a new transport family
+- the shared tweet timeline parser can handle the list wrapper shape with list-specific entry prefixes
+- retry, rate-limit handling, and observability remain consistent on another authenticated read surface
+
+Status:
+
+- `TwitterLists` is implemented and exported as a small signed-in service with `getTweets(listId, options)`.
+- The request layer now includes a typed `ListTweets` descriptor for `ListLatestTweetsTimeline`, using authenticated request auth, the secondary bearer token, and a dedicated `listTweets` bucket.
+- Deterministic tests now cover request metadata, list-wrapper parsing, duplicate-cursor stopping, and 429 retry / observability behavior.
+- Live proof now asserts that a stable list canary returns tweets with restored cookies and records `ListTweets` user-mode strategy context.
 
 ### Slice 5 — Password Login Automation and Direct Messages
 

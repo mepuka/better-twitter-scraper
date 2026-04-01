@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   CookieManager,
+  getConversationProjection,
+  getConversationRoot,
   getDirectReplies,
   getFocalTweet,
   getParentTweet,
   getQuotedTweet,
+  getReplyChain,
   getReplyTree,
   getRetweetedTweet,
   getSelfThread,
@@ -297,6 +300,38 @@ describe("Tweet detail projections", () => {
     expect(document.tweets.map((tweet) => tweet.id)).toEqual(beforeTweetIds);
   });
 
+  it("projects reply chains, conversation roots, and bundled conversation context", () => {
+    const document = parseTweetDetailResponse(tweetDetailFixture, "thread-root");
+
+    const replyChain = getReplyChain(document, "reply-1");
+    const conversationRoot = getConversationRoot(document, "reply-1");
+    const projection = getConversationProjection(document, "thread-child");
+
+    expect(replyChain.map((tweet) => tweet.id)).toEqual([
+      "thread-root",
+      "thread-child",
+      "reply-1",
+    ]);
+    expect(conversationRoot?.id).toBe("thread-root");
+    expect(getConversationRoot(document, "retweet-1")?.id).toBe("retweet-1");
+    expect(getReplyChain(document, "retweet-1").map((tweet) => tweet.id)).toEqual([
+      "retweet-1",
+    ]);
+    expect(projection).toMatchObject({
+      conversationRoot: { id: "thread-root" },
+      directReplies: [{ id: "reply-1" }],
+      parentTweet: { id: "thread-root" },
+      replyChain: [{ id: "thread-root" }, { id: "thread-child" }],
+      replyTree: {
+        tweet: { id: "thread-child" },
+        replies: [{ tweet: { id: "reply-1" }, replies: [] }],
+      },
+      selfThread: [{ id: "thread-root" }, { id: "thread-child" }],
+      tweet: { id: "thread-child" },
+    });
+    expect(getConversationProjection(document, "missing-tweet")).toBeUndefined();
+  });
+
   it("keeps direct replies and reply trees in canonical document order", () => {
     const document = new TweetDetailDocument({
       focalTweetId: "root",
@@ -366,6 +401,13 @@ describe("Tweet detail projections", () => {
       tweet: { id: "root" },
       replies: [{ tweet: { id: "child" }, replies: [] }],
     });
+    expect(getReplyChain(document).map((tweet) => tweet.id)).toEqual([
+      "child",
+      "root",
+    ]);
+    expect(new Set(getReplyChain(document).map((tweet) => tweet.id)).size).toBe(
+      getReplyChain(document).length,
+    );
   });
 });
 

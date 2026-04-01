@@ -118,6 +118,26 @@ const tweetEntry = (tweet: Parameters<typeof tweetResult>[0]) => ({
   },
 });
 
+const listConversationEntry = (
+  tweet: Parameters<typeof tweetResult>[0],
+  entryId = `list-conversation-${tweet.id}`,
+) => ({
+  entryId,
+  content: {
+    items: [
+      {
+        item: {
+          itemContent: {
+            tweet_results: {
+              result: tweetResult(tweet),
+            },
+          },
+        },
+      },
+    ],
+  },
+});
+
 export const tweetsPageOneFixture = {
   data: {
     user: {
@@ -198,6 +218,86 @@ export const tweetsPageTwoFixture = {
               },
             ],
           },
+        },
+      },
+    },
+  },
+} as const;
+
+export const listTweetsPageOneFixture = {
+  data: {
+    list: {
+      tweets_timeline: {
+        timeline: {
+          instructions: [
+            {
+              entries: [
+                tweetEntry({
+                  id: "list-tweet-1",
+                  text: "First list tweet",
+                  username: "xdevelopers",
+                  name: "X Developers",
+                  userId: "2244994945",
+                  createdAt: "Mon Jan 18 11:30:00 +0000 2010",
+                  hashtags: ["lists"],
+                }),
+                listConversationEntry({
+                  id: "list-tweet-2",
+                  text: "Second list tweet",
+                  username: "dev_rel",
+                  name: "Developer Relations",
+                  userId: "3301",
+                  createdAt: "Mon Jan 18 11:45:00 +0000 2010",
+                  mentions: [
+                    {
+                      id: "55",
+                      username: "helper",
+                      name: "Helpful Person",
+                    },
+                  ],
+                }),
+                {
+                  entryId: "cursor-bottom-list-1",
+                  content: {
+                    cursorType: "Bottom",
+                    value: "list-cursor-1",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  },
+} as const;
+
+export const listTweetsPageTwoFixture = {
+  data: {
+    list: {
+      tweets_timeline: {
+        timeline: {
+          instructions: [
+            {
+              entries: [
+                tweetEntry({
+                  id: "list-tweet-3",
+                  text: "Third list tweet",
+                  username: "dev_advocate",
+                  name: "Developer Advocate",
+                  userId: "3302",
+                  createdAt: "Mon Jan 18 12:00:00 +0000 2010",
+                }),
+                {
+                  entryId: "cursor-bottom-list-2",
+                  content: {
+                    cursorType: "Bottom",
+                    value: "list-cursor-1",
+                  },
+                },
+              ],
+            },
+          ],
         },
       },
     },

@@ -1,20 +1,19 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 
 import {
   CookieManager,
-  getConversationProjection,
   ScraperStrategy,
   TwitterConfig,
   TwitterHttpClient,
-  TwitterTweets,
+  TwitterLists,
   UserAuth,
 } from "../index";
 import { loadSerializedCookies } from "../src/live-auth-cookies";
 import { ObservabilityCapture } from "../src/observability-capture";
 
-const THREAD_CANARY_TWEET_ID = "1665602315745673217";
+const LIST_CANARY_ID = "1736495155002106192";
 
-const liveThreadLayer = TwitterTweets.layer.pipe(
+const liveListsLayer = TwitterLists.layer.pipe(
   Layer.provideMerge(ScraperStrategy.standardLayer),
   Layer.provideMerge(UserAuth.liveLayer),
   Layer.provideMerge(CookieManager.liveLayer),
@@ -39,7 +38,7 @@ const main = async () => {
     Effect.gen(function* () {
       const auth = yield* UserAuth;
       const capture = yield* ObservabilityCapture;
-      const tweets = yield* TwitterTweets;
+      const lists = yield* TwitterLists;
 
       yield* auth.restoreCookies(cookies);
 
@@ -47,32 +46,9 @@ const main = async () => {
         throw new Error("Restored cookies did not produce a signed-in session.");
       }
 
-      const document = yield* tweets.getTweet(THREAD_CANARY_TWEET_ID);
-      const thread = yield* tweets.getThread(THREAD_CANARY_TWEET_ID);
-      const projection = getConversationProjection(document);
-
-      if (!projection) {
-        throw new Error("Thread projection did not return conversation context.");
-      }
-
-      if (thread.length <= 1) {
-        throw new Error("Thread lookup did not return a multi-tweet thread.");
-      }
-
-      if (thread[0]?.id !== THREAD_CANARY_TWEET_ID) {
-        throw new Error("Thread lookup did not return the canary root first.");
-      }
-
-      if (projection.conversationRoot.id !== THREAD_CANARY_TWEET_ID) {
-        throw new Error("Thread projection did not preserve the canary root.");
-      }
-
-      if (projection.selfThread.length !== thread.length) {
-        throw new Error(
-          "Thread projection self-thread chain did not match the convenience API.",
-        );
-      }
-
+      const tweets = yield* Stream.runCollect(
+        lists.getTweets(LIST_CANARY_ID, { limit: 3 }),
+      );
       const spans = yield* capture.spans;
       const strategyCalls = spans
         .filter((span) => span.name === "ScraperStrategy.execute")
@@ -81,17 +57,21 @@ const main = async () => {
           endpointId: String(span.attributes.endpoint_id ?? ""),
         }));
 
+      if (tweets.length === 0) {
+        throw new Error("List timeline canary did not return any tweets.");
+      }
+
       return {
-        conversationRootId: projection.conversationRoot.id,
         observability: {
           strategyCalls,
         },
-        replyChainIds: projection.replyChain.map((tweet) => tweet.id),
-        threadIds: thread.map((tweet) => tweet.id),
+        tweets: tweets.map((tweet) => ({
+          id: tweet.id,
+        })),
       };
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(liveThreadLayer, ObservabilityCapture.layer()),
+        Layer.mergeAll(liveListsLayer, ObservabilityCapture.layer()),
       ),
     ),
   );

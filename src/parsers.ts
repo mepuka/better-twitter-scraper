@@ -215,6 +215,18 @@ interface RelationshipTimelineResponse {
   };
 }
 
+interface ListTimelineResponse {
+  readonly data?: {
+    readonly list?: {
+      readonly tweets_timeline?: {
+        readonly timeline?: {
+          readonly instructions?: ReadonlyArray<TimelineInstructionRaw>;
+        };
+      };
+    };
+  };
+}
+
 interface TrendsGuideResponse {
   readonly timeline?: {
     readonly instructions?: ReadonlyArray<{
@@ -583,7 +595,12 @@ const parseProfilesTimelinePage = (
 const parseTweetsTimelinePage = (
   instructions: ReadonlyArray<TimelineInstructionRaw> | undefined,
   options: {
-    readonly endpointId: "Likes" | "UserTweets" | "UserTweetsAndReplies";
+    readonly entryPrefixes: readonly string[];
+    readonly endpointId:
+      | "Likes"
+      | "ListTweets"
+      | "UserTweets"
+      | "UserTweetsAndReplies";
     readonly missingReason: string;
   },
 ): TimelinePage<Tweet> => {
@@ -613,8 +630,9 @@ const parseTweetsTimelinePage = (
       }
 
       if (
-        !entry.entryId.startsWith("tweet") &&
-        !entry.entryId.startsWith("profile-conversation")
+        !options.entryPrefixes.some((prefix) =>
+          entry.entryId.startsWith(prefix),
+        )
       ) {
         continue;
       }
@@ -655,6 +673,7 @@ export const parseTimelinePageResponse = (body: unknown): TimelinePage<Tweet> =>
     response.data?.user?.result?.timeline?.timeline?.instructions;
 
   return parseTweetsTimelinePage(instructions, {
+    entryPrefixes: ["tweet", "profile-conversation"],
     endpointId: "UserTweets",
     missingReason: "Missing timeline instructions in Twitter response",
   });
@@ -668,6 +687,7 @@ export const parseTweetsAndRepliesPageResponse = (
     response.data?.user?.result?.timeline?.timeline?.instructions;
 
   return parseTweetsTimelinePage(instructions, {
+    entryPrefixes: ["tweet", "profile-conversation"],
     endpointId: "UserTweetsAndReplies",
     missingReason:
       "Missing tweets-and-replies timeline instructions in Twitter response",
@@ -682,8 +702,23 @@ export const parseLikedTweetsPageResponse = (
     response.data?.user?.result?.timeline?.timeline?.instructions;
 
   return parseTweetsTimelinePage(instructions, {
+    entryPrefixes: ["tweet", "profile-conversation"],
     endpointId: "Likes",
     missingReason: "Missing liked tweets timeline instructions in Twitter response",
+  });
+};
+
+export const parseListTweetsPageResponse = (
+  body: unknown,
+): TimelinePage<Tweet> => {
+  const response = body as ListTimelineResponse;
+  const instructions =
+    response.data?.list?.tweets_timeline?.timeline?.instructions;
+
+  return parseTweetsTimelinePage(instructions, {
+    entryPrefixes: ["tweet", "list-conversation"],
+    endpointId: "ListTweets",
+    missingReason: "Missing list timeline instructions in Twitter response",
   });
 };
 

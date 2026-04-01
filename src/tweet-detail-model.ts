@@ -111,3 +111,28 @@ export const TweetReplyTreeNode: Schema.Schema<TweetReplyTreeNode> =
     ),
     tweet: TweetDetailNode,
   });
+
+export interface TweetConversationProjection {
+  readonly conversationRoot: TweetDetailNode;
+  readonly directReplies: ReadonlyArray<TweetDetailNode>;
+  readonly parentTweet?: TweetDetailNode;
+  readonly quotedTweet?: TweetDetailNode;
+  readonly replyChain: ReadonlyArray<TweetDetailNode>;
+  readonly replyTree?: TweetReplyTreeNode;
+  readonly retweetedTweet?: TweetDetailNode;
+  readonly selfThread: ReadonlyArray<TweetDetailNode>;
+  readonly tweet: TweetDetailNode;
+}
+
+export const TweetConversationProjection: Schema.Schema<TweetConversationProjection> =
+  Schema.Struct({
+    conversationRoot: TweetDetailNode,
+    directReplies: Schema.Array(TweetDetailNode),
+    parentTweet: Schema.optionalKey(TweetDetailNode),
+    quotedTweet: Schema.optionalKey(TweetDetailNode),
+    replyChain: Schema.Array(TweetDetailNode),
+    replyTree: Schema.optionalKey(TweetReplyTreeNode),
+    retweetedTweet: Schema.optionalKey(TweetDetailNode),
+    selfThread: Schema.Array(TweetDetailNode),
+    tweet: TweetDetailNode,
+  });
