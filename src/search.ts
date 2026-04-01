@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, ServiceMap, Stream } from "effect";
+import { Effect, Layer, ServiceMap, Stream } from "effect";
 
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
@@ -10,17 +10,11 @@ import type {
   TimelinePage,
   Tweet,
 } from "./models";
+import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
 import { UserAuth } from "./user-auth";
 
 type SearchError = AuthenticationError | StrategyError;
-
-interface SearchState {
-  readonly query: string;
-  readonly cursor?: string;
-  readonly remaining: number;
-  readonly seenCursors: ReadonlySet<string>;
-}
 
 export class TwitterSearch extends ServiceMap.Service<
   TwitterSearch,
@@ -85,54 +79,11 @@ export class TwitterSearch extends ServiceMap.Service<
               });
             }
 
-            const initialState: SearchState = {
-              query,
+            return paginateTimeline({
               remaining: options.limit ?? config.search.defaultLimit,
-              seenCursors: new Set<string>(),
-            };
-
-            return Stream.paginate<SearchState, T, SearchError>(
-              initialState,
-              (state) => {
-                if (state.remaining <= 0) {
-                  return Effect.succeed([
-                    [],
-                    Option.none<SearchState>(),
-                  ] as const);
-                }
-
-                return Effect.gen(function* () {
-                  const page = yield* fetchPage(
-                    state.query,
-                    state.remaining,
-                    state.cursor,
-                  );
-                  const items = page.items.slice(0, state.remaining);
-                  const duplicateCursor =
-                    page.nextCursor !== undefined &&
-                    state.seenCursors.has(page.nextCursor);
-                  const remaining = state.remaining - items.length;
-
-                  const nextState =
-                    items.length === 0 ||
-                    !page.nextCursor ||
-                    page.status === "at_end" ||
-                    duplicateCursor ||
-                    remaining <= 0
-                      ? Option.none<SearchState>()
-                      : Option.some({
-                          query: state.query,
-                          cursor: page.nextCursor,
-                          remaining,
-                          seenCursors: new Set(state.seenCursors).add(
-                            page.nextCursor,
-                          ),
-                        });
-
-                  return [items, nextState] as const;
-                });
-              },
-            );
+              fetchPage: (cursor, remaining) =>
+                fetchPage(query, remaining, cursor),
+            });
           }),
         );
 

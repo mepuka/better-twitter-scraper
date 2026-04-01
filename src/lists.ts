@@ -1,20 +1,14 @@
-import { Effect, Layer, Option, ServiceMap, Stream } from "effect";
+import { Effect, Layer, ServiceMap, Stream } from "effect";
 
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
 import { AuthenticationError, InvalidResponseError } from "./errors";
 import type { GetTweetsOptions, TimelinePage, Tweet } from "./models";
+import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
 import { UserAuth } from "./user-auth";
 
 type ListTimelineError = AuthenticationError | InvalidResponseError | StrategyError;
-
-interface ListStreamState {
-  readonly cursor?: string;
-  readonly listId: string;
-  readonly remaining: number;
-  readonly seenCursors: ReadonlySet<string>;
-}
 
 export class TwitterLists extends ServiceMap.Service<
   TwitterLists,
@@ -50,51 +44,11 @@ export class TwitterLists extends ServiceMap.Service<
               });
             }
 
-            const initialState: ListStreamState = {
-              listId,
+            return paginateTimeline({
               remaining: options.limit ?? config.timeline.defaultLimit,
-              seenCursors: new Set<string>(),
-            };
-
-            return Stream.paginate<ListStreamState, Tweet, ListTimelineError>(
-              initialState,
-              (state) => {
-                if (state.remaining <= 0) {
-                  return Effect.succeed([[], Option.none<ListStreamState>()] as const);
-                }
-
-                return Effect.gen(function* () {
-                  const page = yield* fetchTweetsPage(
-                    state.listId,
-                    state.remaining,
-                    state.cursor,
-                  );
-                  const items = page.items.slice(0, state.remaining);
-                  const duplicateCursor =
-                    page.nextCursor !== undefined &&
-                    state.seenCursors.has(page.nextCursor);
-                  const remaining = state.remaining - items.length;
-
-                  const nextState =
-                    items.length === 0 ||
-                    !page.nextCursor ||
-                    page.status === "at_end" ||
-                    duplicateCursor ||
-                    remaining <= 0
-                      ? Option.none<ListStreamState>()
-                      : Option.some({
-                          listId: state.listId,
-                          cursor: page.nextCursor,
-                          remaining,
-                          seenCursors: new Set(state.seenCursors).add(
-                            page.nextCursor,
-                          ),
-                        });
-
-                  return [items, nextState] as const;
-                });
-              },
-            );
+              fetchPage: (cursor, remaining) =>
+                fetchTweetsPage(listId, remaining, cursor),
+            });
           }).pipe(Effect.withSpan("TwitterLists.getTweets")),
         );
 

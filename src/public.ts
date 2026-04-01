@@ -1,19 +1,13 @@
-import { Effect, Layer, Option, ServiceMap, Stream } from "effect";
+import { Effect, Layer, ServiceMap, Stream } from "effect";
 
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
 import { InvalidResponseError } from "./errors";
 import type { GetTweetsOptions, Profile, TimelinePage, Tweet } from "./models";
+import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
 
 type PublicError = StrategyError | InvalidResponseError;
-
-interface TweetStreamState {
-  readonly userId: string;
-  readonly cursor?: string;
-  readonly remaining: number;
-  readonly seenCursors: ReadonlySet<string>;
-}
 
 export class TwitterPublic extends ServiceMap.Service<
   TwitterPublic,
@@ -64,51 +58,11 @@ export class TwitterPublic extends ServiceMap.Service<
               });
             }
 
-            const initialState: TweetStreamState = {
-              userId,
+            return paginateTimeline({
               remaining: options.limit ?? config.timeline.defaultLimit,
-              seenCursors: new Set<string>(),
-            };
-
-            return Stream.paginate<TweetStreamState, Tweet, PublicError>(
-              initialState,
-              (state) => {
-                if (state.remaining <= 0) {
-                  return Effect.succeed([[], Option.none<TweetStreamState>()] as const);
-                }
-
-                return Effect.gen(function* () {
-                  const page = yield* fetchTweetsPage(
-                    state.userId,
-                    state.remaining,
-                    state.cursor,
-                  );
-                  const items = page.items.slice(0, state.remaining);
-                  const duplicateCursor =
-                    page.nextCursor !== undefined &&
-                    state.seenCursors.has(page.nextCursor);
-                  const remaining = state.remaining - items.length;
-
-                  const nextState =
-                    items.length === 0 ||
-                    !page.nextCursor ||
-                    page.status === "at_end" ||
-                    duplicateCursor ||
-                    remaining <= 0
-                      ? Option.none<TweetStreamState>()
-                      : Option.some({
-                          userId: state.userId,
-                          cursor: page.nextCursor,
-                          remaining,
-                          seenCursors: new Set(state.seenCursors).add(
-                            page.nextCursor,
-                          ),
-                        });
-
-                  return [items, nextState] as const;
-                });
-              },
-            );
+              fetchPage: (cursor, remaining) =>
+                fetchTweetsPage(userId, remaining, cursor),
+            });
           }),
         );
 
