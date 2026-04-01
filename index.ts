@@ -1,9 +1,5 @@
-export { AuthPool } from "./src/auth-pool";
-export type {
-  SelectedSession,
-  SessionRateLimitState,
-  SessionSnapshot,
-} from "./src/auth-pool";
+export { PooledScraperStrategy, SessionPoolManager } from "./src/pooled-strategy";
+export type { SessionSnapshot } from "./src/pooled-strategy";
 export { CookieManager } from "./src/cookies";
 export { TwitterConfig } from "./src/config";
 export { TwitterDirectMessages } from "./src/direct-messages";
