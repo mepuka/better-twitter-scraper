@@ -35,25 +35,21 @@ export class TwitterPublic extends ServiceMap.Service<
 
       const getProfile = Effect.fn("TwitterPublic.getProfile")(
         (username: string) =>
-          (strategy.execute(
+          strategy.execute(
             endpointRegistry.userByScreenName(username),
-          ) as Effect.Effect<Profile, StrategyError>).pipe(
-            Effect.withSpan("TwitterPublic.getProfile"),
-          ),
+          ) as Effect.Effect<Profile, StrategyError>,
       );
 
       const fetchTweetsPage = Effect.fn("TwitterPublic.fetchTweetsPage")(
         (userId: string, count: number, cursor?: string) =>
-          (strategy.execute(
+          strategy.execute(
             endpointRegistry.userTweets(
               userId,
               Math.min(count, config.timeline.maxPageSize),
               config.timeline.includePromotedContent,
               cursor,
             ),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>).pipe(
-            Effect.withSpan("TwitterPublic.fetchTweetsPage"),
-          ),
+          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
       );
 
       const getTweets = (username: string, options: GetTweetsOptions = {}) =>

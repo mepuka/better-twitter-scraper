@@ -86,7 +86,7 @@ function createGuestAuthContextLayer() {
           yield* Ref.set(authenticatedAtRef, Option.some(now));
 
           return guestToken;
-        }).pipe(Effect.withSpan("GuestAuth.activate")),
+        }),
       );
 
       const currentToken = Effect.fn("GuestAuth.currentToken")(() =>
@@ -104,7 +104,7 @@ function createGuestAuthContextLayer() {
           }
 
           return yield* activate();
-        }).pipe(Effect.withSpan("GuestAuth.currentToken")),
+        }),
       );
 
       const snapshot = Effect.gen(function* () {

@@ -44,29 +44,25 @@ export class TwitterSearch extends ServiceMap.Service<
 
       const fetchProfilesPage = Effect.fn("TwitterSearch.fetchProfilesPage")(
         (query: string, count: number, cursor?: string) =>
-          (strategy.execute(
+          strategy.execute(
             endpointRegistry.searchProfiles(
               query,
               Math.min(count, config.search.maxPageSize),
               cursor,
             ),
-          ) as Effect.Effect<TimelinePage<Profile>, StrategyError>).pipe(
-            Effect.withSpan("TwitterSearch.fetchProfilesPage"),
-          ),
+          ) as Effect.Effect<TimelinePage<Profile>, StrategyError>,
       );
 
       const fetchTweetsPage = Effect.fn("TwitterSearch.fetchTweetsPage")(
         (query: string, count: number, mode: SearchTweetsOptions["mode"], cursor?: string) =>
-          (strategy.execute(
+          strategy.execute(
             endpointRegistry.searchTweets(
               query,
               Math.min(count, config.search.maxPageSize),
               mode ?? "top",
               cursor,
             ),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>).pipe(
-            Effect.withSpan("TwitterSearch.fetchTweetsPage"),
-          ),
+          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
       );
 
       const streamSearch = <T>(

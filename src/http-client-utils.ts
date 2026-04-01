@@ -72,10 +72,7 @@ export const classifyHttpStatusError = <A>(
       });
     }
 
-    if (
-      request.authRequirement === "guest" &&
-      request.bearerToken === "default"
-    ) {
+    if (request.authRequirement === "guest") {
       return new GuestTokenError({
         reason: `${request.endpointId} rejected the guest token with HTTP ${error.status}.`,
       });

@@ -53,30 +53,24 @@ export class TwitterTweets extends ServiceMap.Service<
 
       const fetchTweetDetail = Effect.fn("TwitterTweets.fetchTweetDetail")(
         (id: string) =>
-          (strategy.execute(
+          strategy.execute(
             endpointRegistry.tweetDetail(id),
-          ) as Effect.Effect<TweetDetailDocument, TweetDetailError>).pipe(
-            Effect.withSpan("TwitterTweets.fetchTweetDetail"),
-          ),
+          ) as Effect.Effect<TweetDetailDocument, TweetDetailError>,
       );
 
       const fetchTweetsAndRepliesPage = Effect.fn(
         "TwitterTweets.fetchTweetsAndRepliesPage",
       )((userId: string, count: number, cursor?: string) =>
-        (strategy.execute(
+        strategy.execute(
           endpointRegistry.userTweetsAndReplies(userId, count, cursor),
-        ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>).pipe(
-          Effect.withSpan("TwitterTweets.fetchTweetsAndRepliesPage"),
-        ),
+        ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
       );
 
       const fetchLikedTweetsPage = Effect.fn("TwitterTweets.fetchLikedTweetsPage")(
         (userId: string, count: number, cursor?: string) =>
-          (strategy.execute(
+          strategy.execute(
             endpointRegistry.likedTweets(userId, count, cursor),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>).pipe(
-            Effect.withSpan("TwitterTweets.fetchLikedTweetsPage"),
-          ),
+          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
       );
 
       const getTweet = Effect.fn("TwitterTweets.getTweet")((id: string) =>
@@ -90,14 +84,11 @@ export class TwitterTweets extends ServiceMap.Service<
           }
 
           return yield* fetchTweetDetail(id);
-        }).pipe(Effect.withSpan("TwitterTweets.getTweet")),
+        }),
       );
 
       const getThread = Effect.fn("TwitterTweets.getThread")((id: string) =>
-        getTweet(id).pipe(
-          Effect.map((document) => getSelfThread(document)),
-          Effect.withSpan("TwitterTweets.getThread"),
-        ),
+        getTweet(id).pipe(Effect.map((document) => getSelfThread(document))),
       );
 
       const streamTweets = (

@@ -34,11 +34,9 @@ export class TwitterLists extends ServiceMap.Service<
 
       const fetchTweetsPage = Effect.fn("TwitterLists.fetchTweetsPage")(
         (listId: string, count: number, cursor?: string) =>
-          (strategy.execute(
+          strategy.execute(
             endpointRegistry.listTweets(listId, count, cursor),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>).pipe(
-            Effect.withSpan("TwitterLists.fetchTweetsPage"),
-          ),
+          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
       );
 
       const getTweets = (listId: string, options: GetTweetsOptions = {}) =>

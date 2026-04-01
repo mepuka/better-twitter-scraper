@@ -1,6 +1,6 @@
-import { Effect, Layer, ServiceMap } from "effect";
+import { Cache, Duration, Effect, Exit, Layer, ServiceMap } from "effect";
 
-import { TwitterConfig } from "./config";
+import { CookieManager } from "./cookies";
 import { endpointRegistry } from "./endpoints";
 import { AuthenticationError, InvalidResponseError } from "./errors";
 import { ScraperStrategy, type StrategyError } from "./strategy";
@@ -17,10 +17,28 @@ export class TwitterTrends extends ServiceMap.Service<
   static readonly layer = Layer.effect(
     TwitterTrends,
     Effect.gen(function* () {
-      yield* TwitterConfig;
-
       const auth = yield* UserAuth;
+      const cookies = yield* CookieManager;
       const strategy = yield* ScraperStrategy;
+      const trendsCache = yield* Cache.makeWith<string, readonly string[], TrendsError>(
+        {
+          capacity: 4,
+          lookup: () =>
+            strategy.execute(endpointRegistry.trends()) as Effect.Effect<
+              readonly string[],
+              TrendsError
+            >,
+          timeToLive: (exit) =>
+            Exit.isSuccess(exit) ? Duration.seconds(30) : Duration.millis(0),
+        },
+      );
+
+      const cacheKey = Effect.fn("TwitterTrends.cacheKey")(function* () {
+        const snapshot = yield* cookies.snapshot;
+        const authToken = snapshot.auth_token ?? "";
+        const csrfToken = snapshot.ct0 ?? "";
+        return `${authToken}\u0000${csrfToken}`;
+      });
 
       const getTrends = Effect.fn("TwitterTrends.getTrends")(() =>
         Effect.gen(function* () {
@@ -31,10 +49,9 @@ export class TwitterTrends extends ServiceMap.Service<
             });
           }
 
-          return yield* (strategy.execute(
-            endpointRegistry.trends(),
-          ) as Effect.Effect<readonly string[], TrendsError>);
-        }).pipe(Effect.withSpan("TwitterTrends.getTrends")),
+          const key = yield* cacheKey();
+          return yield* Cache.get(trendsCache, key);
+        }),
       );
 
       return { getTrends };

@@ -795,23 +795,44 @@ export const parseSearchTweetsResponse = (
 export const parseTrendsResponse = (body: unknown): readonly string[] => {
   const response = body as TrendsGuideResponse;
   const instructions = response.timeline?.instructions;
-  const entries = instructions?.[1]?.addEntries?.entries;
-  const items = entries?.[1]?.content?.timelineModule?.items;
 
-  if (!instructions || !entries || !items) {
+  if (!instructions) {
     throw new InvalidResponseError({
       endpointId: "Trends",
-      reason: "Missing trends guide entries in Twitter response",
+      reason: "Missing trends guide instructions in Twitter response",
     });
   }
 
-  return items.flatMap((item) => {
-    const trendName =
-      item.item?.clientEventInfo?.details?.guideDetails?.transparentGuideDetails
-        ?.trendMetadata?.trendName;
+  const trends: string[] = [];
 
-    return trendName ? [trendName] : [];
-  });
+  for (const instruction of instructions) {
+    const entries = instruction.addEntries?.entries;
+    if (!entries) continue;
+
+    for (const entry of entries) {
+      const items = entry.content?.timelineModule?.items;
+      if (!items) continue;
+
+      for (const item of items) {
+        const trendName =
+          item.item?.clientEventInfo?.details?.guideDetails
+            ?.transparentGuideDetails?.trendMetadata?.trendName;
+
+        if (trendName) {
+          trends.push(trendName);
+        }
+      }
+    }
+  }
+
+  if (trends.length === 0) {
+    throw new InvalidResponseError({
+      endpointId: "Trends",
+      reason: "No trend entries found in Twitter response",
+    });
+  }
+
+  return trends;
 };
 
 export const parseTweetDetailResponse = (

@@ -39,29 +39,25 @@ export class TwitterRelationships extends ServiceMap.Service<
       const fetchFollowersPage = Effect.fn(
         "TwitterRelationships.fetchFollowersPage",
       )((userId: string, count: number, cursor?: string) =>
-        (strategy.execute(
+        strategy.execute(
           endpointRegistry.followers(
             userId,
             Math.min(count, config.search.maxPageSize),
             cursor,
           ),
-        ) as Effect.Effect<TimelinePage<Profile>, StrategyError>).pipe(
-          Effect.withSpan("TwitterRelationships.fetchFollowersPage"),
-        ),
+        ) as Effect.Effect<TimelinePage<Profile>, StrategyError>,
       );
 
       const fetchFollowingPage = Effect.fn(
         "TwitterRelationships.fetchFollowingPage",
       )((userId: string, count: number, cursor?: string) =>
-        (strategy.execute(
+        strategy.execute(
           endpointRegistry.following(
             userId,
             Math.min(count, config.search.maxPageSize),
             cursor,
           ),
-        ) as Effect.Effect<TimelinePage<Profile>, StrategyError>).pipe(
-          Effect.withSpan("TwitterRelationships.fetchFollowingPage"),
-        ),
+        ) as Effect.Effect<TimelinePage<Profile>, StrategyError>,
       );
 
       const streamProfiles = (
