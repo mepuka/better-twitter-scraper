@@ -1,5 +1,7 @@
 import { InvalidResponseError, ProfileNotFoundError } from "./errors";
 import type { Profile, TimelinePage, Tweet } from "./models";
+import type { TweetDetailDocument } from "./tweet-detail-model";
+import { buildTweetDetailDocument } from "./tweet-detail-builder";
 
 interface UrlEntityRaw {
   readonly expanded_url?: string;
@@ -189,6 +191,20 @@ interface SearchTimelineResponse {
       readonly search_timeline?: {
         readonly timeline?: {
           readonly instructions?: ReadonlyArray<SearchInstructionRaw>;
+        };
+      };
+    };
+  };
+}
+
+interface RelationshipTimelineResponse {
+  readonly data?: {
+    readonly user?: {
+      readonly result?: {
+        readonly timeline?: {
+          readonly timeline?: {
+            readonly instructions?: ReadonlyArray<SearchInstructionRaw>;
+          };
         };
       };
     };
@@ -420,10 +436,46 @@ export const parseSearchProfilesResponse = (
   const response = body as SearchTimelineResponse;
   const instructions =
     response.data?.search_by_raw_query?.search_timeline?.timeline?.instructions;
+  return parseProfilesTimelinePage(
+    instructions,
+    "SearchProfiles",
+    "Missing search timeline instructions in Twitter response",
+  );
+};
+
+export const parseFollowersPageResponse = (
+  body: unknown,
+): TimelinePage<Profile> => {
+  const response = body as RelationshipTimelineResponse;
+  const instructions = response.data?.user?.result?.timeline?.timeline?.instructions;
+  return parseProfilesTimelinePage(
+    instructions,
+    "Followers",
+    "Missing followers timeline instructions in Twitter response",
+  );
+};
+
+export const parseFollowingPageResponse = (
+  body: unknown,
+): TimelinePage<Profile> => {
+  const response = body as RelationshipTimelineResponse;
+  const instructions = response.data?.user?.result?.timeline?.timeline?.instructions;
+  return parseProfilesTimelinePage(
+    instructions,
+    "Following",
+    "Missing following timeline instructions in Twitter response",
+  );
+};
+
+const parseProfilesTimelinePage = (
+  instructions: ReadonlyArray<SearchInstructionRaw> | undefined,
+  endpointId: "Followers" | "Following" | "SearchProfiles",
+  missingReason: string,
+): TimelinePage<Profile> => {
   if (!instructions) {
     throw new InvalidResponseError({
-      endpointId: "SearchProfiles",
-      reason: "Missing search timeline instructions in Twitter response",
+      endpointId,
+      reason: missingReason,
     });
   }
 
@@ -551,3 +603,8 @@ export const parseTimelinePageResponse = (body: unknown): TimelinePage<Tweet> =>
     status: nextCursor ? "has_more" : "at_end",
   } as TimelinePage<Tweet>;
 };
+
+export const parseTweetDetailResponse = (
+  body: unknown,
+  focalTweetId: string,
+): TweetDetailDocument => buildTweetDetailDocument(body, focalTweetId);

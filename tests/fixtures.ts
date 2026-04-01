@@ -204,7 +204,7 @@ export const tweetsPageTwoFixture = {
   },
 } as const;
 
-const searchProfileEntry = (profile: {
+const profileTimelineEntry = (profile: {
   readonly id: string;
   readonly username: string;
   readonly name: string;
@@ -257,14 +257,14 @@ export const searchProfilesPageOneFixture = {
             {
               type: "TimelineAddEntries",
               entries: [
-                searchProfileEntry({
+                profileTimelineEntry({
                   id: "2001",
                   username: "twitterdev",
                   name: "Twitter Dev",
                   description: "Developer account",
                   website: "https://developer.x.com",
                 }),
-                searchProfileEntry({
+                profileTimelineEntry({
                   id: "2002",
                   username: "twitterapi",
                   name: "Twitter API",
@@ -294,7 +294,7 @@ export const searchProfilesPageTwoFixture = {
             {
               type: "TimelineAddEntries",
               entries: [
-                searchProfileEntry({
+                profileTimelineEntry({
                   id: "2003",
                   username: "twittereng",
                   name: "Twitter Engineering",
@@ -305,5 +305,502 @@ export const searchProfilesPageTwoFixture = {
         },
       },
     },
+  },
+} as const;
+
+export const followersPageOneFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                type: "TimelineAddEntries",
+                entries: [
+                  profileTimelineEntry({
+                    id: "3001",
+                    username: "follower_one",
+                    name: "Follower One",
+                    description: "First follower",
+                  }),
+                  profileTimelineEntry({
+                    id: "3002",
+                    username: "follower_two",
+                    name: "Follower Two",
+                  }),
+                  {
+                    entryId: "cursor-bottom-followers-1",
+                    content: {
+                      cursorType: "Bottom",
+                      value: "followers-cursor-1",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const followersPageTwoFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                type: "TimelineAddEntries",
+                entries: [
+                  profileTimelineEntry({
+                    id: "3003",
+                    username: "follower_three",
+                    name: "Follower Three",
+                  }),
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const followersDuplicateCursorFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                type: "TimelineAddEntries",
+                entries: [
+                  profileTimelineEntry({
+                    id: "3004",
+                    username: "follower_four",
+                    name: "Follower Four",
+                  }),
+                  {
+                    entryId: "cursor-bottom-followers-duplicate",
+                    content: {
+                      cursorType: "Bottom",
+                      value: "followers-cursor-1",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const followingPageOneFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                type: "TimelineAddEntries",
+                entries: [
+                  profileTimelineEntry({
+                    id: "4001",
+                    username: "following_one",
+                    name: "Following One",
+                  }),
+                  {
+                    entryId: "cursor-bottom-following-1",
+                    content: {
+                      cursorType: "Bottom",
+                      value: "following-cursor-1",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const followingPageTwoFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                type: "TimelineAddEntries",
+                entries: [
+                  profileTimelineEntry({
+                    id: "4002",
+                    username: "following_two",
+                    name: "Following Two",
+                  }),
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+const detailUserResult = (user: {
+  readonly name: string;
+  readonly pinnedTweetIds?: readonly string[];
+  readonly username: string;
+}) => ({
+  result: {
+    core: {
+      name: user.name,
+      screen_name: user.username,
+    },
+    legacy: {
+      name: user.name,
+      pinned_tweet_ids_str: [...(user.pinnedTweetIds ?? [])],
+      screen_name: user.username,
+    },
+    },
+  });
+
+interface DetailTweetInput {
+  readonly bookmarkCount?: number;
+  readonly conversationId: string;
+  readonly createdAt: string;
+  readonly hashtags?: readonly string[];
+  readonly id: string;
+  readonly mentions?: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly username: string;
+  }>;
+  readonly name: string;
+  readonly photos?: ReadonlyArray<{
+    readonly altText?: string;
+    readonly id: string;
+    readonly url: string;
+    readonly tcoUrl: string;
+  }>;
+  readonly pinnedTweetIds?: readonly string[];
+  readonly place?: {
+    readonly fullName: string;
+    readonly id: string;
+    readonly name: string;
+    readonly placeType: string;
+  };
+  readonly quotedResult?: any;
+  readonly replyToId?: string;
+  readonly retweetedResult?: any;
+  readonly text: string;
+  readonly urls?: readonly string[];
+  readonly userId: string;
+  readonly username: string;
+  readonly versions?: readonly string[];
+  readonly videos?: ReadonlyArray<{
+    readonly id: string;
+    readonly preview: string;
+    readonly tcoUrl: string;
+    readonly url: string;
+  }>;
+  readonly views?: string;
+}
+
+const detailTweetResult = (tweet: DetailTweetInput) => {
+  const entitiesUrls = [
+    ...(tweet.urls ?? []).map((url, index) => ({
+      expanded_url: url,
+      url: `https://t.co/link${tweet.id}${index}`,
+    })),
+    ...(tweet.photos ?? []).map((photo) => ({
+      expanded_url: photo.tcoUrl,
+      url: photo.tcoUrl,
+    })),
+    ...(tweet.videos ?? []).map((video) => ({
+      expanded_url: video.tcoUrl,
+      url: video.tcoUrl,
+    })),
+  ];
+
+  return {
+    __typename: "Tweet",
+    core: {
+      user_results: detailUserResult({
+        name: tweet.name,
+        ...(tweet.pinnedTweetIds
+          ? { pinnedTweetIds: tweet.pinnedTweetIds }
+          : {}),
+        username: tweet.username,
+      }),
+    },
+    edit_control: {
+      edit_control_initial: {
+        edit_tweet_ids: [...(tweet.versions ?? [tweet.id])],
+      },
+    },
+    legacy: {
+      bookmark_count: tweet.bookmarkCount ?? 9,
+      conversation_id_str: tweet.conversationId,
+      created_at: tweet.createdAt,
+      entities: {
+        hashtags: (tweet.hashtags ?? []).map((value) => ({ text: value })),
+        urls: entitiesUrls,
+        user_mentions: (tweet.mentions ?? []).map((mention) => ({
+          id_str: mention.id,
+          name: mention.name,
+          screen_name: mention.username,
+        })),
+      },
+      extended_entities:
+        tweet.photos || tweet.videos
+          ? {
+              media: [
+                ...(tweet.photos ?? []).map((photo) => ({
+                  ext_alt_text: photo.altText,
+                  id_str: photo.id,
+                  media_url_https: photo.url,
+                  type: "photo",
+                  url: photo.tcoUrl,
+                })),
+                ...(tweet.videos ?? []).map((video) => ({
+                  id_str: video.id,
+                  media_url_https: video.preview,
+                  type: "video",
+                  url: video.tcoUrl,
+                  video_info: {
+                    variants: [
+                      {
+                        bitrate: 832000,
+                        content_type: "video/mp4",
+                        url: video.url,
+                      },
+                    ],
+                  },
+                })),
+              ],
+            }
+          : undefined,
+      ext_views: tweet.views ? { count: tweet.views } : undefined,
+      favorite_count: 11,
+      full_text: tweet.text,
+      id_str: tweet.id,
+      in_reply_to_status_id_str: tweet.replyToId,
+      place: tweet.place
+        ? {
+            full_name: tweet.place.fullName,
+            id: tweet.place.id,
+            name: tweet.place.name,
+            place_type: tweet.place.placeType,
+          }
+        : undefined,
+      quoted_status_id_str: tweet.quotedResult?.rest_id ?? tweet.quotedResult?.legacy?.id_str,
+      reply_count: 4,
+      retweet_count: 2,
+      retweeted_status_id_str:
+        tweet.retweetedResult?.rest_id ?? tweet.retweetedResult?.legacy?.id_str,
+      retweeted_status_result: tweet.retweetedResult
+        ? { result: tweet.retweetedResult }
+        : undefined,
+      user_id_str: tweet.userId,
+    },
+    note_tweet: {
+      note_tweet_results: {
+        result: {
+          text: tweet.text,
+        },
+      },
+    },
+    quoted_status_result: tweet.quotedResult
+      ? { result: tweet.quotedResult }
+      : undefined,
+    rest_id: tweet.id,
+    views: tweet.views ? { count: tweet.views } : undefined,
+  };
+};
+
+const detailEntry = (
+  tweet: DetailTweetInput,
+  options: {
+    readonly tweetDisplayType?: string;
+  } = {},
+) => ({
+  entryId: `tweet-${tweet.id}`,
+  content: {
+    itemContent: {
+      ...(options.tweetDisplayType
+        ? { tweetDisplayType: options.tweetDisplayType }
+        : {}),
+      tweet_results: {
+        result: detailTweetResult(tweet),
+      },
+    },
+  },
+});
+
+const quotedTweetFixture = detailTweetResult({
+  conversationId: "quoted-1",
+  createdAt: "Tue Jan 19 09:00:00 +0000 2010",
+  id: "quoted-1",
+  name: "Quoted User",
+  text: "Quoted tweet body",
+  urls: ["https://example.com/quoted"],
+  userId: "7001",
+  username: "quoted_user",
+  versions: ["quoted-1"],
+  views: "25",
+});
+
+const originalTweetFixture = detailTweetResult({
+  conversationId: "original-1",
+  createdAt: "Tue Jan 19 10:00:00 +0000 2010",
+  id: "original-1",
+  name: "Original User",
+  text: "Original tweet body",
+  userId: "7002",
+  username: "original_user",
+  versions: ["original-1"],
+  views: "30",
+});
+
+export const tweetDetailFixture = {
+  data: {
+    threaded_conversation_with_injections_v2: {
+      instructions: [
+        {
+          entries: [
+            detailEntry(
+              {
+                bookmarkCount: 9,
+                conversationId: "thread-root",
+                createdAt: "Tue Jan 19 08:00:00 +0000 2010",
+                hashtags: ["thread"],
+                id: "thread-root",
+                mentions: [
+                  {
+                    id: "42",
+                    name: "Friendly User",
+                    username: "friend",
+                  },
+                ],
+                name: "Nomadic",
+                photos: [
+                  {
+                    altText: "Root photo",
+                    id: "photo-1",
+                    tcoUrl: "https://t.co/rootphoto",
+                    url: "https://pbs.twimg.com/media/root-photo.jpg",
+                  },
+                ],
+                pinnedTweetIds: ["thread-root"],
+                place: {
+                  fullName: "Austin, TX",
+                  id: "place-1",
+                  name: "Austin",
+                  placeType: "city",
+                },
+                quotedResult: quotedTweetFixture,
+                text: "Thread root tweet\nhttps://t.co/linkthread-root0 https://t.co/rootphoto",
+                urls: ["https://example.com/root"],
+                userId: "106037940",
+                username: "nomadic_ua",
+                versions: ["thread-root", "thread-root-edit-1"],
+                videos: [
+                  {
+                    id: "video-1",
+                    preview: "https://pbs.twimg.com/media/root-video.jpg",
+                    tcoUrl: "https://t.co/rootvideo",
+                    url: "https://video.twimg.com/ext_tw_video/root-video.mp4",
+                  },
+                ],
+                views: "100",
+              },
+              { tweetDisplayType: "SelfThread" },
+            ),
+            detailEntry(
+              {
+                conversationId: "thread-root",
+                createdAt: "Tue Jan 19 08:10:00 +0000 2010",
+                id: "thread-child",
+                name: "Nomadic",
+                replyToId: "thread-root",
+                text: "Self thread child",
+                userId: "106037940",
+                username: "nomadic_ua",
+                versions: ["thread-child"],
+                views: "80",
+              },
+              { tweetDisplayType: "SelfThread" },
+            ),
+            detailEntry({
+              conversationId: "thread-root",
+              createdAt: "Tue Jan 19 08:20:00 +0000 2010",
+              id: "reply-1",
+              name: "Reply User",
+              replyToId: "thread-child",
+              text: "Reply to child",
+              userId: "8001",
+              username: "reply_user",
+              versions: ["reply-1"],
+              views: "45",
+            }),
+            detailEntry({
+              conversationId: "retweet-1",
+              createdAt: "Tue Jan 19 08:30:00 +0000 2010",
+              id: "retweet-1",
+              name: "Retweeter",
+              retweetedResult: originalTweetFixture,
+              text: "RT original tweet",
+              userId: "8002",
+              username: "retweeter",
+              versions: ["retweet-1"],
+              views: "65",
+            }),
+            detailEntry({
+              conversationId: "quoted-1",
+              createdAt: "Tue Jan 19 09:00:00 +0000 2010",
+              id: "quoted-1",
+              name: "Quoted User",
+              text: "Quoted tweet body",
+              urls: ["https://example.com/quoted"],
+              userId: "7001",
+              username: "quoted_user",
+              versions: ["quoted-1"],
+              views: "25",
+            }),
+            detailEntry({
+              conversationId: "original-1",
+              createdAt: "Tue Jan 19 10:00:00 +0000 2010",
+              id: "original-1",
+              name: "Original User",
+              text: "Original tweet body",
+              userId: "7002",
+              username: "original_user",
+              versions: ["original-1"],
+              views: "30",
+            }),
+          ],
+        },
+      ],
+    },
+  },
+} as const;
+
+export const malformedTweetDetailFixture = {
+  data: {
+    threaded_conversation_with_injections_v2: {},
   },
 } as const;

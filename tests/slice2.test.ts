@@ -9,6 +9,7 @@ import {
   TwitterConfig,
   TwitterHttpClient,
   TwitterPublic,
+  TwitterRelationships,
   TwitterSearch,
   UserAuth,
 } from "../index";
@@ -20,6 +21,11 @@ import { GuestRequestAuth, UserRequestAuth } from "../src/request-auth";
 import * as WebCrypto from "../src/web-crypto";
 import { TwitterXpff } from "../src/xpff";
 import {
+  followersDuplicateCursorFixture,
+  followersPageOneFixture,
+  followersPageTwoFixture,
+  followingPageOneFixture,
+  followingPageTwoFixture,
   profileFixture,
   searchProfilesPageOneFixture,
   searchProfilesPageTwoFixture,
@@ -87,6 +93,18 @@ const searchTestLayer = (
     Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
+const relationshipsTestLayer = (
+  script: HttpScript,
+  initialCookies: Readonly<Record<string, string>> = {},
+) =>
+  TwitterRelationships.layer.pipe(
+    Layer.provideMerge(ScraperStrategy.standardLayer),
+    Layer.provideMerge(UserAuth.testLayer()),
+    Layer.provideMerge(CookieManager.testLayer(initialCookies)),
+    Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
+    Layer.provideMerge(TwitterConfig.testLayer()),
+  );
+
 const mixedRuntimeTestLayer = (
   script: HttpScript,
   initialCookies: Readonly<Record<string, string>> = {},
@@ -96,6 +114,23 @@ const mixedRuntimeTestLayer = (
   } = {},
 ) =>
   Layer.mergeAll(TwitterPublic.layer, TwitterSearch.layer).pipe(
+    Layer.provideMerge(ScraperStrategy.standardLayer),
+    Layer.provideMerge(GuestAuth.liveLayer),
+    Layer.provideMerge(UserAuth.testLayer(userAuthOptions)),
+    Layer.provideMerge(CookieManager.testLayer(initialCookies)),
+    Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
+    Layer.provideMerge(TwitterConfig.testLayer()),
+  );
+
+const mixedRelationshipsTestLayer = (
+  script: HttpScript,
+  initialCookies: Readonly<Record<string, string>> = {},
+  userAuthOptions: {
+    readonly transactionId?: string;
+    readonly xpff?: string;
+  } = {},
+) =>
+  Layer.mergeAll(TwitterPublic.layer, TwitterRelationships.layer).pipe(
     Layer.provideMerge(ScraperStrategy.standardLayer),
     Layer.provideMerge(GuestAuth.liveLayer),
     Layer.provideMerge(UserAuth.testLayer(userAuthOptions)),
@@ -156,6 +191,44 @@ describe("Slice 2 authenticated session", () => {
         ),
       ),
     );
+  });
+});
+
+describe("Slice 4 request registry", () => {
+  it("builds a typed Followers request with the right metadata", () => {
+    const request = endpointRegistry.followers("106037940", 200, "cursor-1");
+
+    expect(request.endpointId).toBe("Followers");
+    expect(request.family).toBe("graphql");
+    expect(request.authRequirement).toBe("user");
+    expect(request.bearerToken).toBe("secondary");
+    expect(request.rateLimitBucket).toBe("followers");
+    expect(request.method).toBe("GET");
+    expect(request.url).toContain("/Followers");
+    expect(decodeURIComponent(request.url)).toContain("\"userId\":\"106037940\"");
+    expect(decodeURIComponent(request.url)).toContain("\"count\":50");
+    expect(decodeURIComponent(request.url)).toContain(
+      "\"includePromotedContent\":false",
+    );
+    expect(decodeURIComponent(request.url)).toContain(
+      "\"withGrokTranslatedBio\":false",
+    );
+    expect(decodeURIComponent(request.url)).toContain("\"cursor\":\"cursor-1\"");
+  });
+
+  it("builds a typed Following request with the right metadata", () => {
+    const request = endpointRegistry.following("106037940", 20);
+
+    expect(request.endpointId).toBe("Following");
+    expect(request.family).toBe("graphql");
+    expect(request.authRequirement).toBe("user");
+    expect(request.bearerToken).toBe("secondary");
+    expect(request.rateLimitBucket).toBe("following");
+    expect(request.method).toBe("GET");
+    expect(request.url).toContain("/Following");
+    expect(decodeURIComponent(request.url)).toContain("\"userId\":\"106037940\"");
+    expect(decodeURIComponent(request.url)).toContain("\"count\":20");
+    expect(decodeURIComponent(request.url)).not.toContain("\"cursor\":");
   });
 });
 
@@ -285,6 +358,275 @@ describe("Slice 2 authenticated search", () => {
         ),
       ),
     );
+  });
+});
+
+describe("Slice 4 authenticated relationships", () => {
+  it("rejects followers when no authenticated session is restored", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const relationships = yield* TwitterRelationships;
+          return yield* Stream.runCollect(
+            relationships.getFollowers("106037940", { limit: 2 }),
+          );
+        }).pipe(Effect.provide(relationshipsTestLayer({}))),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "AuthenticationError",
+      reason: "Authenticated followers lookup requires restored session cookies.",
+    });
+  });
+
+  it("streams followers through the full layer stack with restored cookies", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
+        const relationships = yield* TwitterRelationships;
+
+        yield* auth.restoreCookies(restoredSessionCookies);
+
+        const profiles = yield* Stream.runCollect(
+          relationships.getFollowers("106037940", { limit: 3 }),
+        );
+
+        expect(profiles.map((profile) => profile.username)).toEqual([
+          "follower_one",
+          "follower_two",
+          "follower_three",
+        ]);
+      }).pipe(
+        Effect.provide(
+          relationshipsTestLayer({
+            [httpRequestKey(endpointRegistry.followers("106037940", 3))]: [
+              { status: 200, json: followersPageOneFixture },
+            ],
+            [httpRequestKey(
+              endpointRegistry.followers("106037940", 1, "followers-cursor-1"),
+            )]: [{ status: 200, json: followersPageTwoFixture }],
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("truncates follower results to the requested limit", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
+        const relationships = yield* TwitterRelationships;
+
+        yield* auth.restoreCookies(restoredSessionCookies);
+
+        const profiles = yield* Stream.runCollect(
+          relationships.getFollowers("106037940", { limit: 1 }),
+        );
+
+        expect(profiles.map((profile) => profile.username)).toEqual([
+          "follower_one",
+        ]);
+      }).pipe(
+        Effect.provide(
+          relationshipsTestLayer({
+            [httpRequestKey(endpointRegistry.followers("106037940", 1))]: [
+              { status: 200, json: followersPageOneFixture },
+            ],
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("stops follower pagination when a cursor repeats", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
+        const relationships = yield* TwitterRelationships;
+
+        yield* auth.restoreCookies(restoredSessionCookies);
+
+        const profiles = yield* Stream.runCollect(
+          relationships.getFollowers("106037940", { limit: 10 }),
+        );
+
+        expect(profiles.map((profile) => profile.username)).toEqual([
+          "follower_one",
+          "follower_two",
+          "follower_four",
+        ]);
+      }).pipe(
+        Effect.provide(
+          relationshipsTestLayer({
+            [httpRequestKey(endpointRegistry.followers("106037940", 10))]: [
+              { status: 200, json: followersPageOneFixture },
+            ],
+            [httpRequestKey(
+              endpointRegistry.followers("106037940", 8, "followers-cursor-1"),
+            )]: [{ status: 200, json: followersDuplicateCursorFixture }],
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("treats a structurally drifted followers payload as InvalidResponseError", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const relationships = yield* TwitterRelationships;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          return yield* Stream.runCollect(
+            relationships.getFollowers("106037940", { limit: 2 }),
+          );
+        }).pipe(
+          Effect.provide(
+            relationshipsTestLayer({
+              [httpRequestKey(endpointRegistry.followers("106037940", 2))]: [
+                { status: 200, json: { data: { user: { result: {} } } } },
+              ],
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "InvalidResponseError",
+      endpointId: "Followers",
+    });
+  });
+
+  it("routes follower 429 retries through the existing limiter and observability path", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const capture = yield* ObservabilityCapture;
+          const relationships = yield* TwitterRelationships;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          const followersFiber = yield* Stream.runCollect(
+            relationships.getFollowers("106037940", { limit: 2 }),
+          ).pipe(Effect.forkScoped);
+
+          yield* TestClock.adjust("999 millis");
+          expect(followersFiber.pollUnsafe()).toBeUndefined();
+
+          yield* TestClock.adjust("1 millis");
+          const profiles = yield* Fiber.join(followersFiber);
+
+          expect(profiles.map((profile) => profile.username)).toEqual([
+            "follower_one",
+            "follower_two",
+          ]);
+
+          const logs = yield* capture.logs;
+          const retryLogs = matchingLogs(logs, "429 retry scheduled");
+
+          expect(retryLogs).toHaveLength(1);
+          expect(retryLogs[0]?.annotations).toMatchObject({
+            endpoint_id: "Followers",
+            endpoint_family: "graphql",
+            rate_limit_bucket: "followers",
+            auth_mode: "user",
+            bearer_token: "secondary",
+            transport: "scripted",
+            retry_attempt: 0,
+            status: 429,
+          });
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            TestClock.layer(),
+            ObservabilityCapture.layer(),
+            relationshipsTestLayer({
+              [httpRequestKey(endpointRegistry.followers("106037940", 2))]: [
+                { status: 429, bodyText: "too many followers" },
+                { status: 200, json: followersPageOneFixture },
+              ],
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
+  it("streams following on the same authenticated path", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
+        const relationships = yield* TwitterRelationships;
+
+        yield* auth.restoreCookies(restoredSessionCookies);
+
+        const profiles = yield* Stream.runCollect(
+          relationships.getFollowing("106037940", { limit: 2 }),
+        );
+
+        expect(profiles.map((profile) => profile.username)).toEqual([
+          "following_one",
+          "following_two",
+        ]);
+      }).pipe(
+        Effect.provide(
+          relationshipsTestLayer({
+            [httpRequestKey(endpointRegistry.following("106037940", 2))]: [
+              { status: 200, json: followingPageOneFixture },
+            ],
+            [httpRequestKey(
+              endpointRegistry.following("106037940", 1, "following-cursor-1"),
+            )]: [{ status: 200, json: followingPageTwoFixture }],
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("treats a structurally drifted following payload as InvalidResponseError", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const auth = yield* UserAuth;
+          const relationships = yield* TwitterRelationships;
+
+          yield* auth.restoreCookies(restoredSessionCookies);
+
+          return yield* Stream.runCollect(
+            relationships.getFollowing("106037940", { limit: 2 }),
+          );
+        }).pipe(
+          Effect.provide(
+            relationshipsTestLayer({
+              [httpRequestKey(endpointRegistry.following("106037940", 2))]: [
+                { status: 200, json: { data: { user: { result: {} } } } },
+              ],
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "InvalidResponseError",
+      endpointId: "Following",
+    });
+  });
+
+  it("rejects following when no authenticated session is restored", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const relationships = yield* TwitterRelationships;
+          return yield* Stream.runCollect(
+            relationships.getFollowing("106037940", { limit: 2 }),
+          );
+        }).pipe(Effect.provide(relationshipsTestLayer({}))),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "AuthenticationError",
+      reason: "Authenticated following lookup requires restored session cookies.",
+    });
   });
 });
 
@@ -544,6 +886,68 @@ describe("Slice 3C authenticated observability", () => {
 });
 
 describe("Mixed runtime auth composition", () => {
+  it("resolves a guest profile lookup and authenticated followers in one runtime", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
+        const capture = yield* ObservabilityCapture;
+        const publicApi = yield* TwitterPublic;
+        const relationships = yield* TwitterRelationships;
+
+        yield* auth.restoreCookies(restoredSessionCookies);
+
+        const profile = yield* publicApi.getProfile("nomadic_ua");
+        const userId = profile.userId;
+
+        expect(userId).toBe("106037940");
+
+        const followers = yield* Stream.runCollect(
+          relationships.getFollowers(userId!, { limit: 2 }),
+        );
+
+        expect(followers.map((item) => item.username)).toEqual([
+          "follower_one",
+          "follower_two",
+        ]);
+
+        const spans = yield* capture.spans;
+        const strategySpans = spans.filter(
+          (span) => span.name === "ScraperStrategy.execute",
+        );
+
+        expect(strategySpans).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              attributes: expect.objectContaining({
+                endpoint_id: "UserByScreenName",
+                auth_mode: "guest",
+              }),
+            }),
+            expect.objectContaining({
+              attributes: expect.objectContaining({
+                endpoint_id: "Followers",
+                auth_mode: "user",
+              }),
+            }),
+          ]),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ObservabilityCapture.layer(),
+            mixedRelationshipsTestLayer({
+              [httpRequestKey(endpointRegistry.userByScreenName("nomadic_ua"))]:
+                [{ status: 200, json: profileFixture }],
+              [httpRequestKey(endpointRegistry.followers("106037940", 2))]: [
+                { status: 200, json: followersPageOneFixture },
+              ],
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
   it("hosts guest public reads and authenticated search in one runtime", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {

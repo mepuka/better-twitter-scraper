@@ -473,8 +473,9 @@ The team should not implement the whole surface area in parallel. This project n
 - **Slice 3B is complete in the current codebase**: bucket-aware rate-limit state, one-shot retry timing, `TestClock` coverage, and low-volume repeated live canaries are implemented and passing.
 - **Slice 3C is complete in the current codebase**: internal trace spans, request-context log annotations, decision-level debug logs, and capture-based local and live proofs are implemented and passing.
 - **The guest/user auth seam is fixed in the current codebase**: one assembled runtime can now host guest public services and signed-in services together without a global request-auth collision.
-- **Slice 2 intentionally stopped at one authenticated endpoint**: followers / following, login automation, and DM flows are still deferred.
-- **The main gap is now breadth, not core control flow**: the code has a working guest path, a working authenticated path, classified failures, deterministic retry timing, first-class trace/log context, and mixed-runtime auth composition, but it still lacks additional authenticated endpoint coverage.
+- **Slice 4 is complete in the current codebase**: followers and following now run on the same authenticated GraphQL path as search, with deterministic scripted tests and live proof for followers in a mixed guest-plus-authenticated runtime.
+- **The authenticated tweet-detail foundation is complete in the current codebase**: `TweetDetail` now ships behind a dedicated `TwitterTweets` service, normalizes replies / quotes / retweets / self-thread links through an internal Effect directed graph, and returns a stable acyclic detail document with deterministic tests and authenticated live proof.
+- **The main gap is now breadth on top of the hardened core, not control flow**: the code has a working guest path, a working authenticated path, relationship coverage, authenticated tweet-detail coverage, classified failures, deterministic retry timing, first-class trace/log context, and mixed-runtime auth composition, but it still lacks guest single-post fallback, tweets-and-replies, liked tweets, trends, password-login automation, and DM flows.
 
 The next slices should therefore use the already-working endpoints as proving ground:
 
@@ -630,6 +631,32 @@ Required gates before moving on:
 - confirmation that the new endpoints reuse the same strategy, auth, and limiter path already proven by search
 
 Do not move on until at least one relationship endpoint is proven live.
+
+Status:
+
+- `Followers` and `Following` are implemented in the current codebase.
+- Deterministic pagination, parser-drift, auth rejection, limiter, and mixed-runtime tests are in place.
+- Live proof exists for `Followers` in the same assembled runtime that resolves a public profile by username and then executes the authenticated relationship call by `userId`.
+
+### Slice 4B — Authenticated Tweet Detail Foundation
+
+Build:
+
+- `TwitterTweets.getTweet(id)`
+- authenticated `TweetDetail`
+- internal graph-backed tweet normalization for replies, quotes, retweets, and self-thread relations
+- public acyclic detail document projection
+
+This slice proves:
+
+- the signed-in GraphQL surface can widen beyond search and relationships without reopening auth, retry, or observability design
+- tweet-detail normalization can model the nested graph structure internally while still returning a stable external document shape
+
+Status:
+
+- `TweetDetail` is implemented in the current codebase behind `TwitterTweets`.
+- Deterministic builder/parser tests cover focal tweet presence, reply/quote/retweet/thread relations, deduplication, parser drift, and focal-tweet absence.
+- Live proof exists for an authenticated thread canary and records `TweetDetail` request context in the captured strategy spans.
 
 ### Slice 5 — Password Login Automation and Direct Messages
 

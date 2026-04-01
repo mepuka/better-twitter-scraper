@@ -8,6 +8,7 @@ import {
   InvalidResponseError,
   ProfileNotFoundError,
   RateLimitError,
+  TweetNotFoundError,
 } from "./errors";
 import type { ApiRequest } from "./request";
 
@@ -92,6 +93,10 @@ export const decodeParsedBody = <A>(
     try: () => request.decode(body),
     catch: (error) => {
       if (error instanceof ProfileNotFoundError) {
+        return error;
+      }
+
+      if (error instanceof TweetNotFoundError) {
         return error;
       }
 

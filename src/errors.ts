@@ -49,6 +49,12 @@ export class ProfileNotFoundError extends Data.TaggedError(
   readonly username: string;
 }> {}
 
+export class TweetNotFoundError extends Data.TaggedError(
+  "TweetNotFoundError",
+)<{
+  readonly id: string;
+}> {}
+
 export class AuthenticationError extends Data.TaggedError(
   "AuthenticationError",
 )<{

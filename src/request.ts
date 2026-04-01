@@ -14,15 +14,21 @@ export type RequestMethod = "GET" | "PATCH" | "POST" | "PUT";
 export type ResponseKind = "html" | "json" | "text";
 export type EndpointId =
   | "GuestActivate"
+  | "Followers"
+  | "Following"
   | "SearchProfiles"
+  | "TweetDetail"
   | "UserByScreenName"
   | "UserTweets"
   | (string & {});
 export type RateLimitBucket =
+  | "followers"
   | "generic"
   | "guestActivation"
+  | "following"
   | "profileLookup"
   | "searchProfiles"
+  | "tweetDetail"
   | "userTweets"
   | (string & {});
 

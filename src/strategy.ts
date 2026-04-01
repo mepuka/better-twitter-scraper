@@ -11,6 +11,7 @@ import {
   InvalidResponseError,
   ProfileNotFoundError,
   RateLimitError,
+  TweetNotFoundError,
   TransportError,
 } from "./errors";
 import {
@@ -46,6 +47,7 @@ export type StrategyError =
   | ProfileNotFoundError
   | RateLimitError
   | RequestAuthError
+  | TweetNotFoundError
   | TransportError;
 
 export interface StrategyCookies {

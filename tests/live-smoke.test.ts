@@ -206,9 +206,101 @@ describe("Live authenticated smoke", () => {
         ]),
       );
     }, 30_000);
+
+    it("loads followers through the mixed guest and authenticated runtime", async () => {
+      const result = spawnSync("bun", ["scripts/live-followers-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly followers: readonly string[];
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly profile: {
+          readonly userId?: string;
+          readonly username?: string;
+        };
+      };
+
+      expect(payload.profile.username?.toLowerCase()).toBe("nomadic_ua");
+      expect(payload.profile.userId).toBeTruthy();
+      expect(payload.followers.length).toBeGreaterThan(0);
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "UserByScreenName",
+            authMode: "guest",
+          }),
+          expect.objectContaining({
+            endpointId: "Followers",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
+
+    it("loads authenticated tweet detail for a thread canary", async () => {
+      const result = spawnSync("bun", ["scripts/live-tweet-detail-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly focalTweetId: string;
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly tweetCount: number;
+      };
+
+      expect(payload.focalTweetId).toBe("1665602315745673217");
+      expect(payload.tweetCount).toBeGreaterThan(1);
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "TweetDetail",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
   } else {
     it.skip("restores a signed-in session from cookies", () => {});
     it.skip("searches profiles with restored cookies", () => {});
     it.skip("hosts guest and authenticated services together in one runtime", () => {});
+    it.skip("loads followers through the mixed guest and authenticated runtime", () => {});
+    it.skip("loads authenticated tweet detail for a thread canary", () => {});
   }
 });

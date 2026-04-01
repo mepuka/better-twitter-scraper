@@ -1,10 +1,14 @@
 import type { Profile, TimelinePage, Tweet } from "./models";
 import {
+  parseFollowersPageResponse,
+  parseFollowingPageResponse,
   parseProfileResponse,
   parseSearchProfilesResponse,
+  parseTweetDetailResponse,
   parseTimelinePageResponse,
 } from "./parsers";
 import type { ApiRequest } from "./request";
+import type { TweetDetailDocument } from "./tweet-detail-model";
 
 interface EndpointTemplate {
   readonly url: string;
@@ -12,6 +16,44 @@ interface EndpointTemplate {
   readonly features?: Record<string, unknown>;
   readonly fieldToggles?: Record<string, unknown>;
 }
+
+const authenticatedProfilesTimelineFeatures = {
+  rweb_video_screen_enabled: false,
+  profile_label_improvements_pcf_label_in_post_enabled: true,
+  responsive_web_profile_redirect_enabled: false,
+  rweb_tipjar_consumption_enabled: false,
+  verified_phone_label_enabled: false,
+  creator_subscriptions_tweet_preview_api_enabled: true,
+  responsive_web_graphql_timeline_navigation_enabled: true,
+  responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+  premium_content_api_read_enabled: false,
+  communities_web_enable_tweet_community_results_fetch: true,
+  c9s_tweet_anatomy_moderator_badge_enabled: true,
+  responsive_web_grok_analyze_button_fetch_trends_enabled: false,
+  responsive_web_grok_analyze_post_followups_enabled: true,
+  responsive_web_jetfuel_frame: true,
+  responsive_web_grok_share_attachment_enabled: true,
+  responsive_web_grok_annotations_enabled: true,
+  articles_preview_enabled: true,
+  responsive_web_edit_tweet_api_enabled: true,
+  graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+  view_counts_everywhere_api_enabled: true,
+  longform_notetweets_consumption_enabled: true,
+  responsive_web_twitter_article_tweet_consumption_enabled: true,
+  tweet_awards_web_tipping_enabled: false,
+  responsive_web_grok_show_grok_translated_post: true,
+  responsive_web_grok_analysis_button_from_backend: true,
+  post_ctas_fetch_enabled: true,
+  freedom_of_speech_not_reach_fetch_enabled: true,
+  standardized_nudges_misinfo: true,
+  tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+  longform_notetweets_rich_text_read_enabled: true,
+  longform_notetweets_inline_media_enabled: true,
+  responsive_web_grok_image_annotation_enabled: true,
+  responsive_web_grok_imagine_annotation_enabled: true,
+  responsive_web_grok_community_note_auto_translation_is_enabled: false,
+  responsive_web_enhance_cards_enabled: false,
+} as const;
 
 const endpointTemplates = {
   userByScreenName: {
@@ -99,42 +141,46 @@ const endpointTemplates = {
       product: "Top",
       withGrokTranslatedBio: false,
     },
-    features: {
-      rweb_video_screen_enabled: false,
-      profile_label_improvements_pcf_label_in_post_enabled: true,
-      responsive_web_profile_redirect_enabled: false,
-      rweb_tipjar_consumption_enabled: false,
-      verified_phone_label_enabled: false,
-      creator_subscriptions_tweet_preview_api_enabled: true,
-      responsive_web_graphql_timeline_navigation_enabled: true,
-      responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
-      premium_content_api_read_enabled: false,
-      communities_web_enable_tweet_community_results_fetch: true,
-      c9s_tweet_anatomy_moderator_badge_enabled: true,
-      responsive_web_grok_analyze_button_fetch_trends_enabled: false,
-      responsive_web_grok_analyze_post_followups_enabled: true,
-      responsive_web_jetfuel_frame: true,
-      responsive_web_grok_share_attachment_enabled: true,
-      responsive_web_grok_annotations_enabled: true,
-      articles_preview_enabled: true,
-      responsive_web_edit_tweet_api_enabled: true,
-      graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
-      view_counts_everywhere_api_enabled: true,
-      longform_notetweets_consumption_enabled: true,
-      responsive_web_twitter_article_tweet_consumption_enabled: true,
-      tweet_awards_web_tipping_enabled: false,
-      responsive_web_grok_show_grok_translated_post: true,
-      responsive_web_grok_analysis_button_from_backend: true,
-      post_ctas_fetch_enabled: true,
-      freedom_of_speech_not_reach_fetch_enabled: true,
-      standardized_nudges_misinfo: true,
-      tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
-      longform_notetweets_rich_text_read_enabled: true,
-      longform_notetweets_inline_media_enabled: true,
-      responsive_web_grok_image_annotation_enabled: true,
-      responsive_web_grok_imagine_annotation_enabled: true,
-      responsive_web_grok_community_note_auto_translation_is_enabled: false,
-      responsive_web_enhance_cards_enabled: false,
+    features: authenticatedProfilesTimelineFeatures,
+  },
+  followers: {
+    url: "https://api.x.com/graphql/P7m4Qr-rJEB8KUluOenU6A/Followers",
+    variables: {
+      userId: "1806359170830172162",
+      count: 20,
+      includePromotedContent: false,
+      withGrokTranslatedBio: false,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+  },
+  following: {
+    url: "https://api.x.com/graphql/T5wihsMTYHncY7BB4YxHSg/Following",
+    variables: {
+      userId: "1806359170830172162",
+      count: 20,
+      includePromotedContent: false,
+      withGrokTranslatedBio: false,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+  },
+  tweetDetail: {
+    url: "https://api.x.com/graphql/YCNdW_ZytXfV9YR3cJK9kw/TweetDetail",
+    variables: {
+      focalTweetId: "1985465713096794294",
+      with_rux_injections: false,
+      rankingMode: "Relevance",
+      includePromotedContent: true,
+      withCommunity: true,
+      withQuickPromoteEligibilityTweetFields: true,
+      withBirdwatchNotes: true,
+      withVoice: true,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+    fieldToggles: {
+      withArticleRichContentState: true,
+      withArticlePlainText: false,
+      withDisallowedReplyControls: false,
+      withGrokAnalyze: false,
     },
   },
 } satisfies Readonly<Record<string, EndpointTemplate>>;
@@ -157,6 +203,8 @@ const normalizeForJson = (value: unknown): unknown => {
 };
 
 const stableJson = (value: unknown) => JSON.stringify(normalizeForJson(value));
+
+const relationshipCount = (count: number) => Math.min(count, 50);
 
 const buildUrl = (
   template: EndpointTemplate,
@@ -275,6 +323,75 @@ export const endpointRegistry = {
       }),
       responseKind: "json",
       decode: parseSearchProfilesResponse,
+    };
+  },
+
+  followers(
+    userId: string,
+    count: number,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Profile>> {
+    return {
+      endpointId: "Followers",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "followers",
+      method: "GET",
+      url: buildUrl(endpointTemplates.followers, {
+        variables: {
+          ...endpointTemplates.followers.variables,
+          userId,
+          count: relationshipCount(count),
+          cursor,
+        },
+      }),
+      responseKind: "json",
+      decode: parseFollowersPageResponse,
+    };
+  },
+
+  following(
+    userId: string,
+    count: number,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Profile>> {
+    return {
+      endpointId: "Following",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "following",
+      method: "GET",
+      url: buildUrl(endpointTemplates.following, {
+        variables: {
+          ...endpointTemplates.following.variables,
+          userId,
+          count: relationshipCount(count),
+          cursor,
+        },
+      }),
+      responseKind: "json",
+      decode: parseFollowingPageResponse,
+    };
+  },
+
+  tweetDetail(id: string): ApiRequest<TweetDetailDocument> {
+    return {
+      endpointId: "TweetDetail",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "tweetDetail",
+      method: "GET",
+      url: buildUrl(endpointTemplates.tweetDetail, {
+        variables: {
+          ...endpointTemplates.tweetDetail.variables,
+          focalTweetId: id,
+        },
+      }),
+      responseKind: "json",
+      decode: (body) => parseTweetDetailResponse(body, id),
     };
   },
 } as const;
