@@ -3,7 +3,7 @@ import { Effect, Layer, ServiceMap } from "effect";
 import { CookieManager, type SerializedCookie } from "./cookies";
 import { TwitterConfig } from "./config";
 import { buildBaseHeaders } from "./header-policy";
-import { RequestAuth } from "./request-auth";
+import { UserRequestAuth } from "./request-auth";
 import { TwitterTransactionId } from "./transaction-id";
 import { TwitterXpff } from "./xpff";
 
@@ -37,7 +37,7 @@ const makeBaseUserAuthLayer = () =>
 
 const makeUserRequestAuthLayer = () =>
   Layer.effect(
-    RequestAuth,
+    UserRequestAuth,
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
       const cookies = yield* CookieManager;
@@ -45,7 +45,7 @@ const makeUserRequestAuthLayer = () =>
       const xpff = yield* TwitterXpff;
 
       return {
-        headersFor: Effect.fn("RequestAuth.userHeadersFor")(function* (request) {
+        headersFor: Effect.fn("UserRequestAuth.headersFor")(function* (request) {
           const cookieHeader = yield* cookies.getCookieHeader;
           const csrfToken = yield* cookies.get("ct0");
           const baseHeaders = buildBaseHeaders({
@@ -86,12 +86,9 @@ export class UserAuth extends ServiceMap.Service<
   }
 >()("@better-twitter-scraper/UserAuth") {
   static get liveLayer() {
-    return Layer.mergeAll(
-      makeBaseUserAuthLayer(),
-      makeUserRequestAuthLayer().pipe(
-        Layer.provideMerge(makeBaseUserAuthLayer()),
-      ),
-    ).pipe(
+    const baseLayer = makeBaseUserAuthLayer();
+
+    return Layer.mergeAll(baseLayer, makeUserRequestAuthLayer()).pipe(
       Layer.provideMerge(TwitterXpff.liveLayer),
       Layer.provideMerge(TwitterTransactionId.liveLayer),
     );
@@ -101,12 +98,9 @@ export class UserAuth extends ServiceMap.Service<
     readonly transactionId?: string;
     readonly xpff?: string;
   } = {}) {
-    return Layer.mergeAll(
-      makeBaseUserAuthLayer(),
-      makeUserRequestAuthLayer().pipe(
-        Layer.provideMerge(makeBaseUserAuthLayer()),
-      ),
-    ).pipe(
+    const baseLayer = makeBaseUserAuthLayer();
+
+    return Layer.mergeAll(baseLayer, makeUserRequestAuthLayer()).pipe(
       Layer.provideMerge(TwitterXpff.testLayer(options.xpff)),
       Layer.provideMerge(TwitterTransactionId.testLayer(options.transactionId)),
     );

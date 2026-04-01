@@ -4,28 +4,55 @@ import { TestClock } from "effect/testing";
 
 import {
   CookieManager,
+  GuestAuth,
   ScraperStrategy,
   TwitterConfig,
   TwitterHttpClient,
+  TwitterPublic,
   TwitterSearch,
   UserAuth,
 } from "../index";
 import { endpointRegistry } from "../src/endpoints";
 import type { HttpScript } from "../src/http";
 import { ObservabilityCapture } from "../src/observability-capture";
-import { httpRequestKey } from "../src/request";
-import { RequestAuth } from "../src/request-auth";
+import { httpRequestKey, type ApiRequest } from "../src/request";
+import { GuestRequestAuth, UserRequestAuth } from "../src/request-auth";
 import * as WebCrypto from "../src/web-crypto";
 import { TwitterXpff } from "../src/xpff";
 import {
+  profileFixture,
   searchProfilesPageOneFixture,
   searchProfilesPageTwoFixture,
+  tweetsPageOneFixture,
 } from "./fixtures";
 
 const restoredSessionCookies = [
   "ct0=csrf-token; Path=/; Domain=x.com",
   "auth_token=session-token; Path=/; Domain=x.com; HttpOnly",
 ] as const;
+
+const guestActivateKey = httpRequestKey({
+  method: "POST",
+  url: "https://api.x.com/1.1/guest/activate.json",
+});
+
+const makeDefaultBearerRequest = (): ApiRequest<string> => ({
+  endpointId: "TestDefaultBearer",
+  family: "graphql",
+  authRequirement: "guest",
+  bearerToken: "default",
+  rateLimitBucket: "generic",
+  method: "GET",
+  url: "https://api.x.com/graphql/test/TestDefaultBearer",
+  responseKind: "json",
+  decode: (body) => {
+    const value = (body as { value?: unknown }).value;
+    if (typeof value !== "string") {
+      throw new Error("Missing test value");
+    }
+    return value;
+  },
+});
 
 const matchingLogs = (
   logs: readonly {
@@ -60,6 +87,23 @@ const searchTestLayer = (
     Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
+const mixedRuntimeTestLayer = (
+  script: HttpScript,
+  initialCookies: Readonly<Record<string, string>> = {},
+  userAuthOptions: {
+    readonly transactionId?: string;
+    readonly xpff?: string;
+  } = {},
+) =>
+  Layer.mergeAll(TwitterPublic.layer, TwitterSearch.layer).pipe(
+    Layer.provideMerge(ScraperStrategy.standardLayer),
+    Layer.provideMerge(GuestAuth.liveLayer),
+    Layer.provideMerge(UserAuth.testLayer(userAuthOptions)),
+    Layer.provideMerge(CookieManager.testLayer(initialCookies)),
+    Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
+    Layer.provideMerge(TwitterConfig.testLayer()),
+  );
+
 describe("Slice 2 authenticated session", () => {
   it("restores a logged-in session from serialized cookies", async () => {
     await Effect.runPromise(
@@ -84,7 +128,7 @@ describe("Slice 2 authenticated session", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const auth = yield* UserAuth;
-        const requestAuth = yield* RequestAuth;
+        const requestAuth = yield* UserRequestAuth;
 
         yield* auth.restoreCookies(restoredSessionCookies);
 
@@ -493,6 +537,168 @@ describe("Slice 3C authenticated observability", () => {
                 ],
             }),
           ),
+        ),
+      ),
+    );
+  });
+});
+
+describe("Mixed runtime auth composition", () => {
+  it("hosts guest public reads and authenticated search in one runtime", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
+        const capture = yield* ObservabilityCapture;
+        const publicApi = yield* TwitterPublic;
+        const search = yield* TwitterSearch;
+
+        yield* auth.restoreCookies(restoredSessionCookies);
+
+        const profile = yield* publicApi.getProfile("nomadic_ua");
+        const tweets = yield* Stream.runCollect(
+          publicApi.getTweets("nomadic_ua", { limit: 2 }),
+        );
+        const profiles = yield* Stream.runCollect(
+          search.searchProfiles("Twitter", { limit: 2 }),
+        );
+
+        expect(profile.username).toBe("nomadic_ua");
+        expect(tweets.map((tweet) => tweet.id)).toEqual(["tweet-1", "tweet-2"]);
+        expect(profiles.map((item) => item.username)).toEqual([
+          "twitterdev",
+          "twitterapi",
+        ]);
+
+        const spans = yield* capture.spans;
+        const strategySpans = spans.filter(
+          (span) => span.name === "ScraperStrategy.execute",
+        );
+
+        expect(strategySpans).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              attributes: expect.objectContaining({
+                endpoint_id: "UserByScreenName",
+                auth_mode: "guest",
+              }),
+            }),
+            expect.objectContaining({
+              attributes: expect.objectContaining({
+                endpoint_id: "UserTweets",
+                auth_mode: "guest",
+              }),
+            }),
+            expect.objectContaining({
+              attributes: expect.objectContaining({
+                endpoint_id: "SearchProfiles",
+                auth_mode: "user",
+              }),
+            }),
+          ]),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ObservabilityCapture.layer(),
+            mixedRuntimeTestLayer({
+              [httpRequestKey(endpointRegistry.userByScreenName("nomadic_ua"))]:
+                [
+                  { status: 200, json: profileFixture },
+                  { status: 200, json: profileFixture },
+                ],
+              [httpRequestKey(endpointRegistry.userTweets("106037940", 2, false))]:
+                [{ status: 200, json: tweetsPageOneFixture }],
+              [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]: [
+                { status: 200, json: searchProfilesPageOneFixture },
+              ],
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
+  it("keeps signed-in-only headers off guest requests in a mixed runtime", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
+        const guestRequestAuth = yield* GuestRequestAuth;
+        const userRequestAuth = yield* UserRequestAuth;
+
+        yield* auth.restoreCookies(restoredSessionCookies);
+
+        const guestHeaders = yield* guestRequestAuth.headersFor(
+          endpointRegistry.userByScreenName("nomadic_ua"),
+        );
+        const userHeaders = yield* userRequestAuth.headersFor(
+          endpointRegistry.searchProfiles("Twitter", 2),
+        );
+
+        expect(guestHeaders.cookie).toContain("auth_token=session-token");
+        expect(guestHeaders["x-csrf-token"]).toBe("csrf-token");
+        expect(guestHeaders["x-twitter-auth-type"]).toBeUndefined();
+        expect(guestHeaders["x-twitter-active-user"]).toBeUndefined();
+        expect(guestHeaders["x-client-transaction-id"]).toBeUndefined();
+        expect(guestHeaders["x-xp-forwarded-for"]).toBeUndefined();
+
+        expect(userHeaders["x-twitter-auth-type"]).toBe("OAuth2Session");
+        expect(userHeaders["x-twitter-active-user"]).toBe("yes");
+        expect(userHeaders["x-client-transaction-id"]).toBe("test-transaction-id");
+        expect(userHeaders["x-xp-forwarded-for"]).toBe("test-xpff");
+      }).pipe(
+        Effect.provide(
+          mixedRuntimeTestLayer(
+            {},
+            {},
+            {
+              transactionId: "test-transaction-id",
+              xpff: "test-xpff",
+            },
+          ),
+        ),
+      ),
+    );
+  });
+
+  it("guest token invalidation does not clear the restored user session", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
+        const search = yield* TwitterSearch;
+        const strategy = yield* ScraperStrategy;
+
+        yield* auth.restoreCookies(restoredSessionCookies);
+
+        expect(yield* auth.isLoggedIn()).toBe(true);
+        expect(yield* strategy.execute(makeDefaultBearerRequest())).toBe("guest-ok");
+        expect(yield* auth.isLoggedIn()).toBe(true);
+
+        const profiles = yield* Stream.runCollect(
+          search.searchProfiles("Twitter", { limit: 2 }),
+        );
+
+        expect(profiles.map((profile) => profile.username)).toEqual([
+          "twitterdev",
+          "twitterapi",
+        ]);
+      }).pipe(
+        Effect.provide(
+          mixedRuntimeTestLayer({
+            [guestActivateKey]: [
+              { status: 200, json: { guest_token: "guest-1" } },
+              { status: 200, json: { guest_token: "guest-2" } },
+            ],
+            [httpRequestKey(makeDefaultBearerRequest())]: [
+              {
+                status: 200,
+                headers: { "x-rate-limit-incoming": "0" },
+                json: { value: "guest-ok" },
+              },
+            ],
+            [httpRequestKey(endpointRegistry.searchProfiles("Twitter", 2))]: [
+              { status: 200, json: searchProfilesPageOneFixture },
+            ],
+          }),
         ),
       ),
     );

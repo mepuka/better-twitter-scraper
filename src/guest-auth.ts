@@ -11,7 +11,7 @@ import {
 } from "./errors";
 import { buildBaseHeaders } from "./header-policy";
 import { TwitterHttpClient } from "./http";
-import { RequestAuth } from "./request-auth";
+import { GuestRequestAuth } from "./request-auth";
 import { prepareApiRequest } from "./request";
 
 const invalidGuestActivationPayload = (reason: string) =>
@@ -128,14 +128,14 @@ function createGuestAuthContextLayer() {
   );
 
   const requestAuthLayer = Layer.effect(
-    RequestAuth,
+    GuestRequestAuth,
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
       const cookies = yield* CookieManager;
       const guestAuth = yield* GuestAuth;
 
       return {
-        headersFor: Effect.fn("RequestAuth.guestHeadersFor")(function* (
+        headersFor: Effect.fn("GuestRequestAuth.headersFor")(function* (
           request,
         ) {
           const cookieHeader = yield* cookies.getCookieHeader;

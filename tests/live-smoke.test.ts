@@ -159,8 +159,56 @@ describe("Live authenticated smoke", () => {
         ]),
       );
     }, 30_000);
+
+    it("hosts guest and authenticated services together in one runtime", async () => {
+      const result = spawnSync("bun", ["scripts/live-mixed-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly profile: {
+          readonly username?: string;
+        };
+        readonly usernames: readonly string[];
+      };
+
+      expect(payload.profile.username?.toLowerCase()).toBe("nomadic_ua");
+      expect(payload.usernames.length).toBeGreaterThan(0);
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "UserByScreenName",
+            authMode: "guest",
+          }),
+          expect.objectContaining({
+            endpointId: "SearchProfiles",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
   } else {
     it.skip("restores a signed-in session from cookies", () => {});
     it.skip("searches profiles with restored cookies", () => {});
+    it.skip("hosts guest and authenticated services together in one runtime", () => {});
   }
 });

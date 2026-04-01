@@ -60,6 +60,24 @@ const makeDefaultBearerRequest = (): ApiRequest<string> => ({
   },
 });
 
+const makeGraphqlAltRequest = (): ApiRequest<string> => ({
+  endpointId: "TestGraphqlAlt",
+  family: "graphqlAlt",
+  authRequirement: "guest",
+  bearerToken: "secondary",
+  rateLimitBucket: "generic",
+  method: "GET",
+  url: "https://api.x.com/graphql/test/TestGraphqlAlt",
+  responseKind: "json",
+  decode: (body) => {
+    const value = (body as { value?: unknown }).value;
+    if (typeof value !== "string") {
+      throw new Error("Missing test value");
+    }
+    return value;
+  },
+});
+
 const matchingLogs = (
   logs: readonly {
     readonly annotations: Readonly<Record<string, unknown>>;
@@ -319,6 +337,31 @@ describe("Slice 3A guest failure classification", () => {
     ).rejects.toMatchObject({
       _tag: "BotDetectionError",
       endpointId: "UserByScreenName",
+      status: 404,
+      body: "",
+      reason: "empty_404",
+    });
+  });
+
+  it("maps a blank graphqlAlt 404 to BotDetectionError", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const strategy = yield* ScraperStrategy;
+          return yield* strategy.execute(makeGraphqlAltRequest());
+        }).pipe(
+          Effect.provide(
+            strategyTestLayer({
+              [httpRequestKey(makeGraphqlAltRequest())]: [
+                { status: 404, bodyText: "" },
+              ],
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "BotDetectionError",
+      endpointId: "TestGraphqlAlt",
       status: 404,
       body: "",
       reason: "empty_404",

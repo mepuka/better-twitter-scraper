@@ -52,7 +52,7 @@ export const classifyHttpStatusError = <A>(
   }
 
   if (
-    request.family === "graphql" &&
+    (request.family === "graphql" || request.family === "graphqlAlt") &&
     error.status === 404 &&
     error.body.trim().length === 0
   ) {

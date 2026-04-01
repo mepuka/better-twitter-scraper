@@ -14,12 +14,19 @@ export type RequestAuthError =
   | InvalidResponseError
   | TransportError;
 
-export class RequestAuth extends ServiceMap.Service<
-  RequestAuth,
-  {
-    readonly headersFor: (
-      request: ApiRequest<unknown>,
-    ) => Effect.Effect<Readonly<Record<string, string>>, RequestAuthError>;
-    readonly invalidate: Effect.Effect<void>;
-  }
->()("@better-twitter-scraper/RequestAuth") {}
+export interface RequestAuthHelper {
+  readonly headersFor: (
+    request: ApiRequest<unknown>,
+  ) => Effect.Effect<Readonly<Record<string, string>>, RequestAuthError>;
+  readonly invalidate: Effect.Effect<void>;
+}
+
+export class GuestRequestAuth extends ServiceMap.Service<
+  GuestRequestAuth,
+  RequestAuthHelper
+>()("@better-twitter-scraper/GuestRequestAuth") {}
+
+export class UserRequestAuth extends ServiceMap.Service<
+  UserRequestAuth,
+  RequestAuthHelper
+>()("@better-twitter-scraper/UserRequestAuth") {}

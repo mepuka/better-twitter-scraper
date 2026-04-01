@@ -471,8 +471,10 @@ The team should not implement the whole surface area in parallel. This project n
 - **The seam-fix architecture pass is complete in the current codebase**: caller-driven layer composition, a typed request descriptor, one shared request-header policy, and a transport-only `TwitterHttpClient` are now implemented and passing.
 - **Slice 3A is complete in the current codebase**: failure classification for rate limits, auth rejection, parse drift, and likely bot-detection responses is implemented and passing on the current guest and authenticated proving endpoints.
 - **Slice 3B is complete in the current codebase**: bucket-aware rate-limit state, one-shot retry timing, `TestClock` coverage, and low-volume repeated live canaries are implemented and passing.
+- **Slice 3C is complete in the current codebase**: internal trace spans, request-context log annotations, decision-level debug logs, and capture-based local and live proofs are implemented and passing.
+- **The guest/user auth seam is fixed in the current codebase**: one assembled runtime can now host guest public services and signed-in services together without a global request-auth collision.
 - **Slice 2 intentionally stopped at one authenticated endpoint**: followers / following, login automation, and DM flows are still deferred.
-- **The main gap is now observability and breadth, not core control flow**: the code has a working guest path, a working authenticated path, classified failures, and deterministic retry timing, but it still lacks first-class trace/log context and additional authenticated endpoint coverage.
+- **The main gap is now breadth, not core control flow**: the code has a working guest path, a working authenticated path, classified failures, deterministic retry timing, first-class trace/log context, and mixed-runtime auth composition, but it still lacks additional authenticated endpoint coverage.
 
 The next slices should therefore use the already-working endpoints as proving ground:
 
