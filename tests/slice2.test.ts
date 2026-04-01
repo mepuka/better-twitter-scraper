@@ -364,7 +364,7 @@ describe("Slice 4 authenticated relationships", () => {
       );
       expect(error).toMatchObject({
         _tag: "AuthenticationError",
-        reason: "Authenticated followers lookup requires restored session cookies.",
+        reason: "Followers requires an authenticated session, but session cookies are missing or expired.",
       });
     }).pipe(Effect.provide(relationshipsTestLayer({}))),
   );
@@ -608,7 +608,7 @@ describe("Slice 4 authenticated relationships", () => {
       );
       expect(error).toMatchObject({
         _tag: "AuthenticationError",
-        reason: "Authenticated following lookup requires restored session cookies.",
+        reason: "Following requires an authenticated session, but session cookies are missing or expired.",
       });
     }).pipe(Effect.provide(relationshipsTestLayer({}))),
   );

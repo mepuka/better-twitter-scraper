@@ -424,7 +424,7 @@ describe("Tweet detail service", () => {
       expect(error).toMatchObject({
         _tag: "AuthenticationError",
         reason:
-          "Authenticated tweet detail lookup requires restored session cookies.",
+          "TweetDetail requires an authenticated session, but session cookies are missing or expired.",
       });
     }).pipe(Effect.provide(tweetsTestLayer({}))),
   );
@@ -440,7 +440,7 @@ describe("Tweet detail service", () => {
       expect(error).toMatchObject({
         _tag: "AuthenticationError",
         reason:
-          "Authenticated tweet detail lookup requires restored session cookies.",
+          "TweetDetail requires an authenticated session, but session cookies are missing or expired.",
       });
     }).pipe(Effect.provide(tweetsTestLayer({}))),
   );

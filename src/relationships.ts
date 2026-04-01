@@ -2,13 +2,11 @@ import { Effect, Layer, ServiceMap, Stream } from "effect";
 
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
-import { AuthenticationError } from "./errors";
 import type { GetProfilesOptions, Profile, TimelinePage } from "./models";
 import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
-import { UserAuth } from "./user-auth";
 
-type RelationshipsError = AuthenticationError | StrategyError;
+type RelationshipsError = StrategyError;
 
 export class TwitterRelationships extends ServiceMap.Service<
   TwitterRelationships,
@@ -26,7 +24,6 @@ export class TwitterRelationships extends ServiceMap.Service<
   static readonly layer = Layer.effect(
     TwitterRelationships,
     Effect.gen(function* () {
-      const auth = yield* UserAuth;
       const config = yield* TwitterConfig;
       const strategy = yield* ScraperStrategy;
 
@@ -57,29 +54,17 @@ export class TwitterRelationships extends ServiceMap.Service<
       const streamProfiles = (
         userId: string,
         options: GetProfilesOptions,
-        authErrorReason: string,
         fetchPage: (
           userId: string,
           count: number,
           cursor?: string,
         ) => Effect.Effect<TimelinePage<Profile>, StrategyError>,
       ) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const loggedIn = yield* auth.isLoggedIn();
-            if (!loggedIn) {
-              return yield* new AuthenticationError({
-                reason: authErrorReason,
-              });
-            }
-
-            return paginateTimeline({
-              remaining: options.limit ?? config.search.defaultLimit,
-              fetchPage: (cursor, remaining) =>
-                fetchPage(userId, remaining, cursor),
-            });
-          }),
-        );
+        paginateTimeline({
+          remaining: options.limit ?? config.search.defaultLimit,
+          fetchPage: (cursor, remaining) =>
+            fetchPage(userId, remaining, cursor),
+        });
 
       const getFollowers = (
         userId: string,
@@ -88,7 +73,6 @@ export class TwitterRelationships extends ServiceMap.Service<
         streamProfiles(
           userId,
           options,
-          "Authenticated followers lookup requires restored session cookies.",
           fetchFollowersPage,
         );
 
@@ -99,7 +83,6 @@ export class TwitterRelationships extends ServiceMap.Service<
         streamProfiles(
           userId,
           options,
-          "Authenticated following lookup requires restored session cookies.",
           fetchFollowingPage,
         );
 

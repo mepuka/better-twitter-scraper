@@ -200,7 +200,6 @@ describe("Signed-in tweet search", () => {
       );
       expect(error).toMatchObject({
         _tag: "AuthenticationError",
-        reason: "Authenticated search requires restored session cookies.",
       });
     }).pipe(Effect.provide(searchTestLayer({}))),
   );
@@ -308,7 +307,7 @@ describe("Signed-in tweets and replies", () => {
       expect(error).toMatchObject({
         _tag: "AuthenticationError",
         reason:
-          "Authenticated tweets-and-replies lookup requires restored session cookies.",
+          "UserTweetsAndReplies requires an authenticated session, but session cookies are missing or expired.",
       });
     }).pipe(Effect.provide(tweetsTestLayer({}))),
   );
@@ -468,7 +467,7 @@ describe("Signed-in liked tweets", () => {
       );
       expect(error).toMatchObject({
         _tag: "AuthenticationError",
-        reason: "Authenticated liked tweets lookup requires restored session cookies.",
+        reason: "Likes requires an authenticated session, but session cookies are missing or expired.",
       });
     }).pipe(Effect.provide(tweetsTestLayer({}))),
   );

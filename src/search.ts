@@ -2,7 +2,6 @@ import { Effect, Layer, ServiceMap, Stream } from "effect";
 
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
-import { AuthenticationError } from "./errors";
 import type {
   GetProfilesOptions,
   Profile,
@@ -12,9 +11,8 @@ import type {
 } from "./models";
 import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
-import { UserAuth } from "./user-auth";
 
-type SearchError = AuthenticationError | StrategyError;
+type SearchError = StrategyError;
 
 export class TwitterSearch extends ServiceMap.Service<
   TwitterSearch,
@@ -33,7 +31,6 @@ export class TwitterSearch extends ServiceMap.Service<
     TwitterSearch,
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
-      const auth = yield* UserAuth;
       const strategy = yield* ScraperStrategy;
 
       const fetchProfilesPage = Effect.fn("TwitterSearch.fetchProfilesPage")(
@@ -70,22 +67,11 @@ export class TwitterSearch extends ServiceMap.Service<
           cursor?: string,
         ) => Effect.Effect<TimelinePage<T>, StrategyError>,
       ) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const loggedIn = yield* auth.isLoggedIn();
-            if (!loggedIn) {
-              return yield* new AuthenticationError({
-                reason: "Authenticated search requires restored session cookies.",
-              });
-            }
-
-            return paginateTimeline({
-              remaining: options.limit ?? config.search.defaultLimit,
-              fetchPage: (cursor, remaining) =>
-                fetchPage(query, remaining, cursor),
-            });
-          }),
-        );
+        paginateTimeline({
+          remaining: options.limit ?? config.search.defaultLimit,
+          fetchPage: (cursor, remaining) =>
+            fetchPage(query, remaining, cursor),
+        });
 
       const searchProfiles = (
         query: string,

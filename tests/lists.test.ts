@@ -123,7 +123,7 @@ describe("List timeline service", () => {
       expect(error).toMatchObject({
         _tag: "AuthenticationError",
         reason:
-          "Authenticated list timeline lookup requires restored session cookies.",
+          "ListTweets requires an authenticated session, but session cookies are missing or expired.",
       });
     }).pipe(Effect.provide(listTestLayer({}))),
   );
@@ -192,9 +192,6 @@ describe("List timeline service", () => {
               rate_limit_bucket: "listTweets",
             }),
             name: "ScraperStrategy.execute",
-          }),
-          expect.objectContaining({
-            name: "TwitterLists.getTweets",
           }),
           expect.objectContaining({
             name: "TwitterLists.fetchTweetsPage",

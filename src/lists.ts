@@ -2,13 +2,12 @@ import { Effect, Layer, ServiceMap, Stream } from "effect";
 
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
-import { AuthenticationError, InvalidResponseError } from "./errors";
+import { InvalidResponseError } from "./errors";
 import type { GetTweetsOptions, Tweet } from "./models";
 import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
-import { UserAuth } from "./user-auth";
 
-type ListTimelineError = AuthenticationError | InvalidResponseError | StrategyError;
+type ListTimelineError = InvalidResponseError | StrategyError;
 
 export class TwitterLists extends ServiceMap.Service<
   TwitterLists,
@@ -23,7 +22,6 @@ export class TwitterLists extends ServiceMap.Service<
     TwitterLists,
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
-      const auth = yield* UserAuth;
       const strategy = yield* ScraperStrategy;
 
       const fetchTweetsPage = Effect.fn("TwitterLists.fetchTweetsPage")(
@@ -34,23 +32,11 @@ export class TwitterLists extends ServiceMap.Service<
       );
 
       const getTweets = (listId: string, options: GetTweetsOptions = {}) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const loggedIn = yield* auth.isLoggedIn();
-            if (!loggedIn) {
-              return yield* new AuthenticationError({
-                reason:
-                  "Authenticated list timeline lookup requires restored session cookies.",
-              });
-            }
-
-            return paginateTimeline({
-              remaining: options.limit ?? config.timeline.defaultLimit,
-              fetchPage: (cursor, remaining) =>
-                fetchTweetsPage(listId, remaining, cursor),
-            });
-          }).pipe(Effect.withSpan("TwitterLists.getTweets")),
-        );
+        paginateTimeline({
+          remaining: options.limit ?? config.timeline.defaultLimit,
+          fetchPage: (cursor, remaining) =>
+            fetchTweetsPage(listId, remaining, cursor),
+        });
 
       return {
         getTweets,

@@ -2,21 +2,19 @@ import { Effect, Layer, ServiceMap, Stream } from "effect";
 
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
-import { AuthenticationError, InvalidResponseError, TweetNotFoundError } from "./errors";
+import { InvalidResponseError, TweetNotFoundError } from "./errors";
 import type { GetTweetsOptions, TimelinePage, Tweet } from "./models";
 import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
 import { TweetDetailDocument, TweetDetailNode } from "./tweet-detail-model";
 import { getSelfThread } from "./tweet-detail-projections";
-import { UserAuth } from "./user-auth";
 
 type TweetDetailError =
-  | AuthenticationError
   | InvalidResponseError
   | StrategyError
   | TweetNotFoundError;
 
-type TweetTimelineError = AuthenticationError | StrategyError;
+type TweetTimelineError = StrategyError;
 
 export class TwitterTweets extends ServiceMap.Service<
   TwitterTweets,
@@ -47,8 +45,6 @@ export class TwitterTweets extends ServiceMap.Service<
     TwitterTweets,
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
-
-      const auth = yield* UserAuth;
       const strategy = yield* ScraperStrategy;
 
       const fetchTweetDetail = Effect.fn("TwitterTweets.fetchTweetDetail")(
@@ -88,17 +84,7 @@ export class TwitterTweets extends ServiceMap.Service<
       );
 
       const getTweet = Effect.fn("TwitterTweets.getTweet")((id: string) =>
-        Effect.gen(function* () {
-          const loggedIn = yield* auth.isLoggedIn();
-          if (!loggedIn) {
-            return yield* new AuthenticationError({
-              reason:
-                "Authenticated tweet detail lookup requires restored session cookies.",
-            });
-          }
-
-          return yield* fetchTweetDetail(id);
-        }),
+        fetchTweetDetail(id),
       );
 
       const getThread = Effect.fn("TwitterTweets.getThread")((id: string) =>
@@ -108,29 +94,17 @@ export class TwitterTweets extends ServiceMap.Service<
       const streamTweets = (
         userId: string,
         options: GetTweetsOptions,
-        authErrorReason: string,
         fetchPage: (
           userId: string,
           count: number,
           cursor?: string,
         ) => Effect.Effect<TimelinePage<Tweet>, StrategyError>,
       ) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const loggedIn = yield* auth.isLoggedIn();
-            if (!loggedIn) {
-              return yield* new AuthenticationError({
-                reason: authErrorReason,
-              });
-            }
-
-            return paginateTimeline({
-              remaining: options.limit ?? config.timeline.defaultLimit,
-              fetchPage: (cursor, remaining) =>
-                fetchPage(userId, remaining, cursor),
-            });
-          }),
-        );
+        paginateTimeline({
+          remaining: options.limit ?? config.timeline.defaultLimit,
+          fetchPage: (cursor, remaining) =>
+            fetchPage(userId, remaining, cursor),
+        });
 
       const getTweetsAndReplies = (
         userId: string,
@@ -139,7 +113,6 @@ export class TwitterTweets extends ServiceMap.Service<
         streamTweets(
           userId,
           options,
-          "Authenticated tweets-and-replies lookup requires restored session cookies.",
           fetchTweetsAndRepliesPage,
         );
 
@@ -150,28 +123,15 @@ export class TwitterTweets extends ServiceMap.Service<
         streamTweets(
           userId,
           options,
-          "Authenticated liked tweets lookup requires restored session cookies.",
           fetchLikedTweetsPage,
         );
 
       const getHomeTimeline = (options: GetTweetsOptions = {}) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const loggedIn = yield* auth.isLoggedIn();
-            if (!loggedIn) {
-              return yield* new AuthenticationError({
-                reason:
-                  "Authenticated home timeline lookup requires restored session cookies.",
-              });
-            }
-
-            return paginateTimeline({
-              remaining: options.limit ?? config.timeline.defaultLimit,
-              fetchPage: (cursor, remaining) =>
-                fetchHomeTimelinePage(remaining, cursor),
-            });
-          }),
-        );
+        paginateTimeline({
+          remaining: options.limit ?? config.timeline.defaultLimit,
+          fetchPage: (cursor, remaining) =>
+            fetchHomeTimelinePage(remaining, cursor),
+        });
 
       return {
         getTweet,
