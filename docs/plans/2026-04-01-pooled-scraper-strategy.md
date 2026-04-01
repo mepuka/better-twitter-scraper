@@ -61,6 +61,14 @@ Everything else (rate limits, transport errors, invalid responses, not-found) fa
 
 Cap rotation attempts at `sessionCount` to prevent infinite loops.
 
+### Empty Pool and Guest-Only Capsules
+
+When the pool starts with no sessions (`initialSessions = []`), it creates a single **guest-only capsule** — a capsule with cookies but no user auth tokens. This capsule can handle `authRequirement: "guest"` endpoints (profile lookup, user tweets, anonymous tweet fetch) but fails for `authRequirement: "user"` endpoints.
+
+This ensures guest/public endpoints work immediately without requiring `addSession()` first. The pool behaves like the current single-session setup: guest endpoints work, user endpoints fail with `AuthenticationError`.
+
+When `addSession()` is called, the new capsule has both guest and user auth capabilities. The pool then has multiple capsules (the guest-only one plus the user ones) and `selectCandidates` filters by capability as usual.
+
 ### Bad Session Handling (v1)
 
 **Explicit non-goal:** automatic quarantine or permanent removal. Failed sessions remain in the candidate pool. The live cookie check prevents truly dead sessions from being selected for user-auth requests. A cooldown/quarantine system is a v2 concern.
@@ -108,16 +116,35 @@ Extract the construction logic from 5 modules into reusable factory functions. B
 
 ---
 
-### Task 2: Add live auth check to UserRequestAuth
+### Task 2: Widen RequestAuthError and add live auth check
 
-Make `UserRequestAuth.headersFor` fail with `AuthenticationError` when required cookies are missing, so the strategy catches bad sessions without making a network call.
+Make `UserRequestAuth.headersFor` fail with `AuthenticationError` when required cookies are missing. This requires widening the `RequestAuthError` type first, since the current contract does not include `AuthenticationError`.
 
 **Files:**
+- Modify: `src/request-auth.ts` — add `AuthenticationError` to the `RequestAuthError` union
 - Modify: `src/user-auth.ts` — add cookie presence check at the start of `headersFor`
 
-**Implementation:**
+**Step 1:** Widen `RequestAuthError` in `src/request-auth.ts`:
 ```typescript
-// At the start of headersFor:
+// Before:
+export type RequestAuthError =
+  | GuestTokenError
+  | HttpStatusError
+  | InvalidResponseError
+  | TransportError;
+
+// After:
+export type RequestAuthError =
+  | AuthenticationError
+  | GuestTokenError
+  | HttpStatusError
+  | InvalidResponseError
+  | TransportError;
+```
+Import `AuthenticationError` from `./errors`. This is a type-level change — `StrategyError` already includes both `RequestAuthError` and `AuthenticationError`, so the wider union doesn't change the strategy's error channel.
+
+**Step 2:** Add the live check in `src/user-auth.ts` at the start of `UserRequestAuth.headersFor`:
+```typescript
 const csrfToken = yield* cookies.get("ct0");
 const authToken = yield* cookies.get("auth_token");
 if (!csrfToken || !authToken) {
@@ -129,11 +156,9 @@ if (!csrfToken || !authToken) {
 
 This runs in both pooled and non-pooled paths since both use `UserRequestAuth`.
 
-**Step 1:** Add the check. Import `AuthenticationError`.
+**Step 3:** Verify tests pass — existing tests that provide valid cookies should be unaffected.
 
-**Step 2:** Verify tests pass — existing tests that provide valid cookies should be unaffected. Tests that don't restore cookies and call user-auth endpoints should now get `AuthenticationError` from the strategy instead of from the service pre-check.
-
-**Step 3:** Commit.
+**Step 4:** Commit.
 
 ---
 
@@ -250,6 +275,9 @@ export class SessionPoolManager extends ServiceMap.Service<
 ```
 
 **PooledScraperStrategy:**
+
+Both `ScraperStrategy.execute` and `SessionPoolManager.addSession` must read/write the **same** capsule list. The layer constructs a single `Ref<ReadonlyArray<SessionCapsule>>` and closes over it in both service implementations:
+
 ```typescript
 export class PooledScraperStrategy {
   static layer(
@@ -258,14 +286,50 @@ export class PooledScraperStrategy {
     return Layer.effect(
       Layer.mergeAll(ScraperStrategy, SessionPoolManager),
       Effect.gen(function* () {
-        // Resolve shared deps
-        // Create capsules from initialSessions
-        // Build execute + pool management
+        const config = yield* TwitterConfig;
+        const http = yield* TwitterHttpClient;
+        const transactionId = yield* TwitterTransactionId;
+        const transport = yield* TransportMetadata;
+
+        const shared = { config, http, transactionId };
+        const capsulesRef = yield* Ref.make<ReadonlyArray<SessionCapsule>>([]);
+        const nextIdRef = yield* Ref.make(0);
+
+        // Create initial capsules
+        for (const cookies of initialSessions) {
+          const id = yield* Ref.getAndUpdate(nextIdRef, (n) => n + 1);
+          const capsule = yield* createSessionCapsule(id, cookies, shared);
+          yield* Ref.update(capsulesRef, (cs) => [...cs, capsule]);
+        }
+
+        // addSession closes over the SAME capsulesRef
+        const addSession = (cookies) => Effect.gen(function* () {
+          const id = yield* Ref.getAndUpdate(nextIdRef, (n) => n + 1);
+          const capsule = yield* createSessionCapsule(id, cookies, shared);
+          yield* Ref.update(capsulesRef, (cs) => [...cs, capsule]);
+        });
+
+        // execute closes over the SAME capsulesRef
+        const execute = <A>(request: ApiRequest<A>) => Effect.gen(function* () {
+          const capsules = yield* selectCandidates(capsulesRef, request);
+          // ... rotation loop ...
+        });
+
+        return {
+          // ScraperStrategy
+          execute,
+          // SessionPoolManager
+          addSession,
+          sessionCount: Ref.get(capsulesRef).pipe(Effect.map((cs) => cs.length)),
+          snapshot: Ref.get(capsulesRef).pipe(Effect.map(buildSnapshot)),
+        };
       }),
     );
   }
 }
 ```
+
+The critical invariant: `capsulesRef` is created once and shared by both interfaces. There is no second construction.
 
 **Execute flow:**
 1. `selectCandidates(request)` — filter capsules by auth capability (live cookie check for user-auth), sort by rate limit state for the request's bucket
