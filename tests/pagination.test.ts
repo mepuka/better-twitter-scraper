@@ -1,10 +1,11 @@
 import { Effect, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vitest";
 import { paginateTimeline } from "../src/pagination";
 import type { TimelinePage } from "../src/models";
 
 describe("paginateTimeline", () => {
-  it("collects items across pages and stops at cursor end", async () => {
+  it.effect("collects items across pages and stops at cursor end", () => {
     const pages: TimelinePage<string>[] = [
       { items: ["a", "b"], nextCursor: "c1", status: "has_more" },
       { items: ["c"], status: "at_end" },
@@ -16,11 +17,13 @@ describe("paginateTimeline", () => {
       fetchPage: () => Effect.succeed(pages[call++]!),
     });
 
-    const result = await Effect.runPromise(Stream.runCollect(stream));
-    expect([...result]).toEqual(["a", "b", "c"]);
+    return Effect.gen(function* () {
+      const result = yield* Stream.runCollect(stream);
+      expect([...result]).toEqual(["a", "b", "c"]);
+    });
   });
 
-  it("stops when remaining reaches zero", async () => {
+  it.effect("stops when remaining reaches zero", () => {
     const stream = paginateTimeline({
       remaining: 2,
       fetchPage: () =>
@@ -31,11 +34,13 @@ describe("paginateTimeline", () => {
         }),
     });
 
-    const result = await Effect.runPromise(Stream.runCollect(stream));
-    expect([...result]).toEqual(["a", "b"]);
+    return Effect.gen(function* () {
+      const result = yield* Stream.runCollect(stream);
+      expect([...result]).toEqual(["a", "b"]);
+    });
   });
 
-  it("stops on duplicate cursor", async () => {
+  it.effect("stops on duplicate cursor", () => {
     const pages: TimelinePage<string>[] = [
       { items: ["a"], nextCursor: "same", status: "has_more" },
       { items: ["b"], nextCursor: "same", status: "has_more" },
@@ -47,18 +52,22 @@ describe("paginateTimeline", () => {
       fetchPage: () => Effect.succeed(pages[call++]!),
     });
 
-    const result = await Effect.runPromise(Stream.runCollect(stream));
-    expect([...result]).toEqual(["a", "b"]);
+    return Effect.gen(function* () {
+      const result = yield* Stream.runCollect(stream);
+      expect([...result]).toEqual(["a", "b"]);
+    });
   });
 
-  it("returns empty stream when remaining is zero", async () => {
+  it.effect("returns empty stream when remaining is zero", () => {
     const stream = paginateTimeline({
       remaining: 0,
       fetchPage: () =>
         Effect.succeed({ items: ["a"], status: "at_end" as const }),
     });
 
-    const result = await Effect.runPromise(Stream.runCollect(stream));
-    expect([...result]).toEqual([]);
+    return Effect.gen(function* () {
+      const result = yield* Stream.runCollect(stream);
+      expect([...result]).toEqual([]);
+    });
   });
 });

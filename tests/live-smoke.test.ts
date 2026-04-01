@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vitest";
 
 import {
   CookieManager,
@@ -114,17 +115,15 @@ describe("Live authenticated smoke", () => {
       throw serializedCookiesError;
     });
   } else if (runAuthLive && serializedCookies && serializedCookies.length > 0) {
-    it("restores a signed-in session from cookies", async () => {
-      await Effect.runPromise(
-        Effect.gen(function* () {
-          const auth = yield* UserAuth;
+    it.effect("restores a signed-in session from cookies", () =>
+      Effect.gen(function* () {
+        const auth = yield* UserAuth;
 
-          yield* auth.restoreCookies(serializedCookies);
+        yield* auth.restoreCookies(serializedCookies);
 
-          expect(yield* auth.isLoggedIn()).toBe(true);
-        }).pipe(Effect.provide(userAuthLiveLayer)),
-      );
-    }, 30_000);
+        expect(yield* auth.isLoggedIn()).toBe(true);
+      }).pipe(Effect.provide(userAuthLiveLayer)),
+    { timeout: 30_000 });
 
     it("searches profiles with restored cookies", async () => {
       const result = spawnSync("bun", ["scripts/live-auth-smoke.ts"], {

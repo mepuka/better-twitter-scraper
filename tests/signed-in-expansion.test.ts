@@ -1,5 +1,6 @@
 import { Effect, Layer, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vitest";
 
 import {
   CookieManager,
@@ -189,60 +190,58 @@ describe("Signed-in expansion request registry", () => {
 });
 
 describe("Signed-in tweet search", () => {
-  it("rejects tweet search when no authenticated session is restored", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("rejects tweet search when no authenticated session is restored", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const search = yield* TwitterSearch;
           return yield* Stream.runCollect(search.searchTweets("Twitter", { limit: 2 }));
-        }).pipe(Effect.provide(searchTestLayer({}))),
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "AuthenticationError",
+        reason: "Authenticated search requires restored session cookies.",
+      });
+    }).pipe(Effect.provide(searchTestLayer({}))),
+  );
+
+  it.effect("searches tweets through the authenticated layer stack", () =>
+    Effect.gen(function* () {
+      const auth = yield* UserAuth;
+      const search = yield* TwitterSearch;
+
+      yield* auth.restoreCookies(restoredSessionCookies);
+
+      const tweets = yield* Stream.runCollect(
+        search.searchTweets("Twitter", { limit: 3, mode: "top" }),
+      );
+
+      expect(tweets.map((tweet) => tweet.id)).toEqual([
+        "search-tweet-1",
+        "search-tweet-2",
+        "search-tweet-3",
+      ]);
+      expect(tweets[0]?.views).toBe(111);
+    }).pipe(
+      Effect.provide(
+        searchTestLayer({
+          [httpRequestKey(endpointRegistry.searchTweets("Twitter", 3, "top"))]: [
+            { status: 200, json: searchTweetsPageOneFixture },
+          ],
+          [httpRequestKey(
+            endpointRegistry.searchTweets(
+              "Twitter",
+              1,
+              "top",
+              "search-tweets-cursor-1",
+            ),
+          )]: [{ status: 200, json: searchTweetsPageTwoFixture }],
+        }),
       ),
-    ).rejects.toMatchObject({
-      _tag: "AuthenticationError",
-      reason: "Authenticated search requires restored session cookies.",
-    });
-  });
+    ),
+  );
 
-  it("searches tweets through the authenticated layer stack", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const auth = yield* UserAuth;
-        const search = yield* TwitterSearch;
-
-        yield* auth.restoreCookies(restoredSessionCookies);
-
-        const tweets = yield* Stream.runCollect(
-          search.searchTweets("Twitter", { limit: 3, mode: "top" }),
-        );
-
-        expect(tweets.map((tweet) => tweet.id)).toEqual([
-          "search-tweet-1",
-          "search-tweet-2",
-          "search-tweet-3",
-        ]);
-        expect(tweets[0]?.views).toBe(111);
-      }).pipe(
-        Effect.provide(
-          searchTestLayer({
-            [httpRequestKey(endpointRegistry.searchTweets("Twitter", 3, "top"))]: [
-              { status: 200, json: searchTweetsPageOneFixture },
-            ],
-            [httpRequestKey(
-              endpointRegistry.searchTweets(
-                "Twitter",
-                1,
-                "top",
-                "search-tweets-cursor-1",
-              ),
-            )]: [{ status: 200, json: searchTweetsPageTwoFixture }],
-          }),
-        ),
-      ),
-    );
-  });
-
-  it("retries a 429 tweet search response once and records user-mode observability context", async () => {
-    await Effect.runPromise(
+  it.live("retries a 429 tweet search response once and records user-mode observability context", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const capture = yield* ObservabilityCapture;
@@ -292,30 +291,29 @@ describe("Signed-in tweet search", () => {
           ),
         ),
       ),
-    );
-  });
+  );
 });
 
 describe("Signed-in tweets and replies", () => {
-  it("rejects tweets-and-replies lookup when no authenticated session is restored", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("rejects tweets-and-replies lookup when no authenticated session is restored", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const tweets = yield* TwitterTweets;
           return yield* Stream.runCollect(
             tweets.getTweetsAndReplies("106037940", { limit: 2 }),
           );
-        }).pipe(Effect.provide(tweetsTestLayer({}))),
-      ),
-    ).rejects.toMatchObject({
-      _tag: "AuthenticationError",
-      reason:
-        "Authenticated tweets-and-replies lookup requires restored session cookies.",
-    });
-  });
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "AuthenticationError",
+        reason:
+          "Authenticated tweets-and-replies lookup requires restored session cookies.",
+      });
+    }).pipe(Effect.provide(tweetsTestLayer({}))),
+  );
 
-  it("loads tweets-and-replies pages and truncates to the requested limit", async () => {
-    await Effect.runPromise(
+  it.effect("loads tweets-and-replies pages and truncates to the requested limit", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const tweets = yield* TwitterTweets;
@@ -339,11 +337,9 @@ describe("Signed-in tweets and replies", () => {
           }),
         ),
       ),
-    );
-  });
+  );
 
-  it("stops tweets-and-replies pagination on a duplicate cursor", async () => {
-    await Effect.runPromise(
+  it.effect("stops tweets-and-replies pagination on a duplicate cursor", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const tweets = yield* TwitterTweets;
@@ -375,12 +371,11 @@ describe("Signed-in tweets and replies", () => {
           }),
         ),
       ),
-    );
-  });
+  );
 
-  it("treats missing tweets-and-replies instructions as parse drift", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("treats missing tweets-and-replies instructions as parse drift", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const auth = yield* UserAuth;
           const tweets = yield* TwitterTweets;
@@ -390,24 +385,24 @@ describe("Signed-in tweets and replies", () => {
           return yield* Stream.runCollect(
             tweets.getTweetsAndReplies("106037940", { limit: 2 }),
           );
-        }).pipe(
-          Effect.provide(
-            tweetsTestLayer({
-              [httpRequestKey(
-                endpointRegistry.userTweetsAndReplies("106037940", 2),
-              )]: [{ status: 200, json: { data: { user: { result: {} } } } }],
-            }),
-          ),
-        ),
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "InvalidResponseError",
+        endpointId: "UserTweetsAndReplies",
+      });
+    }).pipe(
+      Effect.provide(
+        tweetsTestLayer({
+          [httpRequestKey(
+            endpointRegistry.userTweetsAndReplies("106037940", 2),
+          )]: [{ status: 200, json: { data: { user: { result: {} } } } }],
+        }),
       ),
-    ).rejects.toMatchObject({
-      _tag: "InvalidResponseError",
-      endpointId: "UserTweetsAndReplies",
-    });
-  });
+    ),
+  );
 
-  it("retries a 429 tweets-and-replies response once and records user-mode observability context", async () => {
-    await Effect.runPromise(
+  it.live("retries a 429 tweets-and-replies response once and records user-mode observability context", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const capture = yield* ObservabilityCapture;
@@ -457,29 +452,28 @@ describe("Signed-in tweets and replies", () => {
           ),
         ),
       ),
-    );
-  });
+  );
 });
 
 describe("Signed-in liked tweets", () => {
-  it("rejects liked tweets lookup when no authenticated session is restored", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("rejects liked tweets lookup when no authenticated session is restored", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const tweets = yield* TwitterTweets;
           return yield* Stream.runCollect(
             tweets.getLikedTweets("106037940", { limit: 2 }),
           );
-        }).pipe(Effect.provide(tweetsTestLayer({}))),
-      ),
-    ).rejects.toMatchObject({
-      _tag: "AuthenticationError",
-      reason: "Authenticated liked tweets lookup requires restored session cookies.",
-    });
-  });
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "AuthenticationError",
+        reason: "Authenticated liked tweets lookup requires restored session cookies.",
+      });
+    }).pipe(Effect.provide(tweetsTestLayer({}))),
+  );
 
-  it("loads liked tweets pages and truncates to the requested limit", async () => {
-    await Effect.runPromise(
+  it.effect("loads liked tweets pages and truncates to the requested limit", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const tweets = yield* TwitterTweets;
@@ -507,11 +501,9 @@ describe("Signed-in liked tweets", () => {
           }),
         ),
       ),
-    );
-  });
+  );
 
-  it("stops liked-tweets pagination on a duplicate cursor", async () => {
-    await Effect.runPromise(
+  it.effect("stops liked-tweets pagination on a duplicate cursor", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const tweets = yield* TwitterTweets;
@@ -539,12 +531,11 @@ describe("Signed-in liked tweets", () => {
           }),
         ),
       ),
-    );
-  });
+  );
 
-  it("treats missing liked-tweets instructions as parse drift", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("treats missing liked-tweets instructions as parse drift", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const auth = yield* UserAuth;
           const tweets = yield* TwitterTweets;
@@ -554,24 +545,24 @@ describe("Signed-in liked tweets", () => {
           return yield* Stream.runCollect(
             tweets.getLikedTweets("106037940", { limit: 2 }),
           );
-        }).pipe(
-          Effect.provide(
-            tweetsTestLayer({
-              [httpRequestKey(endpointRegistry.likedTweets("106037940", 2))]: [
-                { status: 200, json: { data: { user: { result: {} } } } },
-              ],
-            }),
-          ),
-        ),
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "InvalidResponseError",
+        endpointId: "Likes",
+      });
+    }).pipe(
+      Effect.provide(
+        tweetsTestLayer({
+          [httpRequestKey(endpointRegistry.likedTweets("106037940", 2))]: [
+            { status: 200, json: { data: { user: { result: {} } } } },
+          ],
+        }),
       ),
-    ).rejects.toMatchObject({
-      _tag: "InvalidResponseError",
-      endpointId: "Likes",
-    });
-  });
+    ),
+  );
 
-  it("retries a 429 liked-tweets response once and records user-mode observability context", async () => {
-    await Effect.runPromise(
+  it.live("retries a 429 liked-tweets response once and records user-mode observability context", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const capture = yield* ObservabilityCapture;
@@ -619,27 +610,26 @@ describe("Signed-in liked tweets", () => {
           ),
         ),
       ),
-    );
-  });
+  );
 });
 
 describe("Signed-in trends", () => {
-  it("rejects trends lookup when no authenticated session is restored", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("rejects trends lookup when no authenticated session is restored", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const trends = yield* TwitterTrends;
           return yield* trends.getTrends();
-        }).pipe(Effect.provide(trendsTestLayer({}))),
-      ),
-    ).rejects.toMatchObject({
-      _tag: "AuthenticationError",
-      reason: "Authenticated trends lookup requires restored session cookies.",
-    });
-  });
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "AuthenticationError",
+        reason: "Authenticated trends lookup requires restored session cookies.",
+      });
+    }).pipe(Effect.provide(trendsTestLayer({}))),
+  );
 
-  it("loads trends through the authenticated layer stack", async () => {
-    await Effect.runPromise(
+  it.effect("loads trends through the authenticated layer stack", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const trends = yield* TwitterTrends;
@@ -658,12 +648,11 @@ describe("Signed-in trends", () => {
           }),
         ),
       ),
-    );
-  });
+  );
 
-  it("treats malformed trends payloads as invalid responses", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("treats malformed trends payloads as invalid responses", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const auth = yield* UserAuth;
           const trends = yield* TwitterTrends;
@@ -671,24 +660,24 @@ describe("Signed-in trends", () => {
           yield* auth.restoreCookies(restoredSessionCookies);
 
           return yield* trends.getTrends();
-        }).pipe(
-          Effect.provide(
-            trendsTestLayer({
-              [httpRequestKey(endpointRegistry.trends())]: [
-                { status: 200, json: { timeline: { instructions: [{}] } } },
-              ],
-            }),
-          ),
-        ),
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "InvalidResponseError",
+        endpointId: "Trends",
+      });
+    }).pipe(
+      Effect.provide(
+        trendsTestLayer({
+          [httpRequestKey(endpointRegistry.trends())]: [
+            { status: 200, json: { timeline: { instructions: [{}] } } },
+          ],
+        }),
       ),
-    ).rejects.toMatchObject({
-      _tag: "InvalidResponseError",
-      endpointId: "Trends",
-    });
-  });
+    ),
+  );
 
-  it("retries a 429 trends response once and records user-mode observability context", async () => {
-    await Effect.runPromise(
+  it.live("retries a 429 trends response once and records user-mode observability context", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const capture = yield* ObservabilityCapture;
@@ -734,13 +723,11 @@ describe("Signed-in trends", () => {
           ),
         ),
       ),
-    );
-  });
+  );
 });
 
 describe("Signed-in expansion mixed runtime", () => {
-  it("keeps guest and authenticated request modes separate in one runtime", async () => {
-    await Effect.runPromise(
+  it.effect("keeps guest and authenticated request modes separate in one runtime", () =>
       Effect.gen(function* () {
         const auth = yield* UserAuth;
         const capture = yield* ObservabilityCapture;
@@ -793,6 +780,5 @@ describe("Signed-in expansion mixed runtime", () => {
           ),
         ),
       ),
-    );
-  });
+  );
 });

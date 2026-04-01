@@ -1,5 +1,6 @@
 import { Effect, Layer, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vitest";
 
 import {
   CookieManager,
@@ -109,114 +110,111 @@ describe("List timeline parser", () => {
 });
 
 describe("List timeline service", () => {
-  it("rejects list timeline lookup when no authenticated session is restored", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("rejects list timeline lookup when no authenticated session is restored", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const lists = yield* TwitterLists;
           return yield* Stream.runCollect(
             lists.getTweets("1736495155002106192", { limit: 1 }),
           );
-        }).pipe(Effect.provide(listTestLayer({}))),
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "AuthenticationError",
+        reason:
+          "Authenticated list timeline lookup requires restored session cookies.",
+      });
+    }).pipe(Effect.provide(listTestLayer({}))),
+  );
+
+  it.effect("streams list tweets and stops when a cursor repeats", () =>
+    Effect.gen(function* () {
+      const auth = yield* UserAuth;
+      const lists = yield* TwitterLists;
+
+      yield* auth.restoreCookies(restoredSessionCookies);
+      const tweets = yield* Stream.runCollect(
+        lists.getTweets("1736495155002106192", { limit: 10 }),
+      );
+
+      expect(tweets.map((tweet) => tweet.id)).toEqual([
+        "list-tweet-1",
+        "list-tweet-2",
+        "list-tweet-3",
+      ]);
+    }).pipe(
+      Effect.provide(
+        listTestLayer({
+          [httpRequestKey(
+            endpointRegistry.listTweets("1736495155002106192", 10),
+          )]: [{ status: 200, json: listTweetsPageOneFixture }],
+          [httpRequestKey(
+            endpointRegistry.listTweets(
+              "1736495155002106192",
+              8,
+              "list-cursor-1",
+            ),
+          )]: [{ status: 200, json: listTweetsPageTwoFixture }],
+        }),
       ),
-    ).rejects.toMatchObject({
-      _tag: "AuthenticationError",
-      reason:
-        "Authenticated list timeline lookup requires restored session cookies.",
-    });
-  });
+    ),
+  );
 
-  it("streams list tweets and stops when a cursor repeats", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const auth = yield* UserAuth;
-        const lists = yield* TwitterLists;
+  it.live("retries a 429 list timeline response once and records user observability context", () =>
+    Effect.gen(function* () {
+      const auth = yield* UserAuth;
+      const capture = yield* ObservabilityCapture;
+      const lists = yield* TwitterLists;
 
-        yield* auth.restoreCookies(restoredSessionCookies);
-        const tweets = yield* Stream.runCollect(
-          lists.getTweets("1736495155002106192", { limit: 10 }),
-        );
+      yield* auth.restoreCookies(restoredSessionCookies);
+      const tweets = yield* Stream.runCollect(
+        lists.getTweets("1736495155002106192", { limit: 2 }),
+      );
+      const logs = yield* capture.logs;
+      const spans = yield* capture.spans;
 
-        expect(tweets.map((tweet) => tweet.id)).toEqual([
-          "list-tweet-1",
-          "list-tweet-2",
-          "list-tweet-3",
-        ]);
-      }).pipe(
-        Effect.provide(
+      expect(tweets.map((tweet) => tweet.id)).toEqual([
+        "list-tweet-1",
+        "list-tweet-2",
+      ]);
+      expect(
+        matchingLogs(logs, "429 retry scheduled").map(
+          (entry) => entry.annotations.rate_limit_bucket,
+        ),
+      ).toContain("listTweets");
+      expect(spans).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            attributes: expect.objectContaining({
+              auth_mode: "user",
+              endpoint_id: "ListTweets",
+              rate_limit_bucket: "listTweets",
+            }),
+            name: "ScraperStrategy.execute",
+          }),
+          expect.objectContaining({
+            name: "TwitterLists.getTweets",
+          }),
+          expect.objectContaining({
+            name: "TwitterLists.fetchTweetsPage",
+          }),
+        ]),
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
           listTestLayer({
             [httpRequestKey(
-              endpointRegistry.listTweets("1736495155002106192", 10),
-            )]: [{ status: 200, json: listTweetsPageOneFixture }],
-            [httpRequestKey(
-              endpointRegistry.listTweets(
-                "1736495155002106192",
-                8,
-                "list-cursor-1",
-              ),
-            )]: [{ status: 200, json: listTweetsPageTwoFixture }],
+              endpointRegistry.listTweets("1736495155002106192", 2),
+            )]: [
+              { status: 429, bodyText: "rate limited" },
+              { status: 200, json: listTweetsPageOneFixture },
+            ],
           }),
+          ObservabilityCapture.layer(),
         ),
       ),
-    );
-  });
-
-  it("retries a 429 list timeline response once and records user observability context", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const auth = yield* UserAuth;
-        const capture = yield* ObservabilityCapture;
-        const lists = yield* TwitterLists;
-
-        yield* auth.restoreCookies(restoredSessionCookies);
-        const tweets = yield* Stream.runCollect(
-          lists.getTweets("1736495155002106192", { limit: 2 }),
-        );
-        const logs = yield* capture.logs;
-        const spans = yield* capture.spans;
-
-        expect(tweets.map((tweet) => tweet.id)).toEqual([
-          "list-tweet-1",
-          "list-tweet-2",
-        ]);
-        expect(
-          matchingLogs(logs, "429 retry scheduled").map(
-            (entry) => entry.annotations.rate_limit_bucket,
-          ),
-        ).toContain("listTweets");
-        expect(spans).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              attributes: expect.objectContaining({
-                auth_mode: "user",
-                endpoint_id: "ListTweets",
-                rate_limit_bucket: "listTweets",
-              }),
-              name: "ScraperStrategy.execute",
-            }),
-            expect.objectContaining({
-              name: "TwitterLists.getTweets",
-            }),
-            expect.objectContaining({
-              name: "TwitterLists.fetchTweetsPage",
-            }),
-          ]),
-        );
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            listTestLayer({
-              [httpRequestKey(
-                endpointRegistry.listTweets("1736495155002106192", 2),
-              )]: [
-                { status: 429, bodyText: "rate limited" },
-                { status: 200, json: listTweetsPageOneFixture },
-              ],
-            }),
-            ObservabilityCapture.layer(),
-          ),
-        ),
-      ),
-    );
-  });
+    ),
+  );
 });

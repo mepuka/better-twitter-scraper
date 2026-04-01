@@ -12,6 +12,7 @@
       },
       "devDependencies": {
         "@effect/language-service": "^0.80.0",
+        "@effect/vitest": "4.0.0-beta.35",
         "@types/bun": "latest",
         "typescript": "^5.9.3",
         "vitest": "^4.1.0",
@@ -20,6 +21,8 @@
   },
   "packages": {
     "@effect/language-service": ["@effect/language-service@0.80.0", "", { "bin": { "effect-language-service": "cli.js" } }, "sha512-dKMATT1fDzaCpNrICpXga7sjJBtFLpKCAoE/1MiGXI8UwcHA9rmAZ2t52JO9g/kJpERWyomkJ+rl+VFlwNIofg=="],
+
+    "@effect/vitest": ["@effect/vitest@4.0.0-beta.35", "", { "peerDependencies": { "effect": "^4.0.0-beta.35", "vitest": "^3.0.0 || ^4.0.0" } }, "sha512-wdt6j7yNL8cYXSyi1QWch4UPpjB0C7QBzStmdMSmIzAZ3ZVAUcyQkdfg/hnUJt6NPZMdjVmbI7m93ml5Mqqnhw=="],
 
     "@emnapi/core": ["@emnapi/core@1.9.1", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.0", "tslib": "^2.4.0" } }, "sha512-mukuNALVsoix/w1BJwFzwXBN/dHeejQtuVzcDsfOEsdpCumXb/E9j8w11h5S54tT1xhifGfbbSm/ICrObRb3KA=="],
 

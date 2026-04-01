@@ -1,6 +1,7 @@
 import { Effect, Option } from "effect";
 import * as Cookies from "effect/unstable/http/Cookies";
-import { describe, expect, it } from "vitest";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vitest";
 
 import { HttpStatusError } from "../src/errors";
 import type { RequestAuthHelper } from "../src/request-auth";
@@ -112,7 +113,7 @@ const makeGuestRequest = (overrides?: Partial<ApiRequest<string>>): ApiRequest<s
 // ---------------------------------------------------------------------------
 
 describe("createStrategyExecute fallback chains", () => {
-  it("falls back to guest auth after user auth hits 429 rate limit", async () => {
+  it.effect("falls back to guest auth after user auth hits 429 rate limit", () => {
     // First call: 429 from user auth. Second call: success via guest auth.
     const transport = scriptedTransport([
       { status: 429, headers: { "x-rate-limit-limit": "100", "x-rate-limit-remaining": "0" } },
@@ -131,11 +132,13 @@ describe("createStrategyExecute fallback chains", () => {
       0, // retryLimit = 0 so executeWithRetry won't retry internally
     );
 
-    const result = await Effect.runPromise(execute(makeUserRequest()));
-    expect(JSON.parse(result)).toEqual({ ok: "guest-fallback" });
+    return Effect.gen(function* () {
+      const result = yield* execute(makeUserRequest());
+      expect(JSON.parse(result)).toEqual({ ok: "guest-fallback" });
+    });
   });
 
-  it("falls back to guest auth after user auth hits 401 authentication failure", async () => {
+  it.effect("falls back to guest auth after user auth hits 401 authentication failure", () => {
     // First call: 401 from user auth. Second call: success via guest auth.
     const transport = scriptedTransport([
       { status: 401 },
@@ -154,11 +157,13 @@ describe("createStrategyExecute fallback chains", () => {
       0,
     );
 
-    const result = await Effect.runPromise(execute(makeUserRequest()));
-    expect(JSON.parse(result)).toEqual({ ok: "guest-fallback-401" });
+    return Effect.gen(function* () {
+      const result = yield* execute(makeUserRequest());
+      expect(JSON.parse(result)).toEqual({ ok: "guest-fallback-401" });
+    });
   });
 
-  it("falls back to guest auth after user auth hits 403 authentication failure", async () => {
+  it.effect("falls back to guest auth after user auth hits 403 authentication failure", () => {
     const transport = scriptedTransport([
       { status: 403 },
       { json: { ok: "guest-fallback-403" } },
@@ -176,11 +181,13 @@ describe("createStrategyExecute fallback chains", () => {
       0,
     );
 
-    const result = await Effect.runPromise(execute(makeUserRequest()));
-    expect(JSON.parse(result)).toEqual({ ok: "guest-fallback-403" });
+    return Effect.gen(function* () {
+      const result = yield* execute(makeUserRequest());
+      expect(JSON.parse(result)).toEqual({ ok: "guest-fallback-403" });
+    });
   });
 
-  it("does NOT fall back when the request already uses guest auth", async () => {
+  it.effect("does NOT fall back when the request already uses guest auth", () => {
     // Guest request hitting 429 should just fail — no fallback.
     const transport = scriptedTransport([
       { status: 429, headers: { "x-rate-limit-limit": "100", "x-rate-limit-remaining": "0" } },
@@ -198,11 +205,13 @@ describe("createStrategyExecute fallback chains", () => {
       0,
     );
 
-    const result = await Effect.runPromise(extractError(execute(makeGuestRequest())));
-    expect(result._tag).toBe("RateLimitError");
+    return Effect.gen(function* () {
+      const result = yield* extractError(execute(makeGuestRequest()));
+      expect(result._tag).toBe("RateLimitError");
+    });
   });
 
-  it("does NOT fall back on BotDetectionError", async () => {
+  it.effect("does NOT fall back on BotDetectionError", () => {
     // status 399 is classified as BotDetectionError — no fallback should happen
     const transport = scriptedTransport([
       { status: 399 },
@@ -220,11 +229,13 @@ describe("createStrategyExecute fallback chains", () => {
       0,
     );
 
-    const result = await Effect.runPromise(extractError(execute(makeUserRequest())));
-    expect(result._tag).toBe("BotDetectionError");
+    return Effect.gen(function* () {
+      const result = yield* extractError(execute(makeUserRequest()));
+      expect(result._tag).toBe("BotDetectionError");
+    });
   });
 
-  it("does NOT fall back when no guest auth is available", async () => {
+  it.effect("does NOT fall back when no guest auth is available", () => {
     const transport = scriptedTransport([
       { status: 429, headers: { "x-rate-limit-limit": "100", "x-rate-limit-remaining": "0" } },
     ]);
@@ -241,11 +252,13 @@ describe("createStrategyExecute fallback chains", () => {
       0,
     );
 
-    const result = await Effect.runPromise(extractError(execute(makeUserRequest())));
-    expect(result._tag).toBe("RateLimitError");
+    return Effect.gen(function* () {
+      const result = yield* extractError(execute(makeUserRequest()));
+      expect(result._tag).toBe("RateLimitError");
+    });
   });
 
-  it("surfaces the guest-auth error when the fallback itself fails", async () => {
+  it.effect("surfaces the guest-auth error when the fallback itself fails", () => {
     // User auth 429, then guest auth also 429 — the second rate limit surfaces.
     const transport = scriptedTransport([
       { status: 429, headers: { "x-rate-limit-limit": "100", "x-rate-limit-remaining": "0" } },
@@ -264,8 +277,10 @@ describe("createStrategyExecute fallback chains", () => {
       0,
     );
 
-    const result = await Effect.runPromise(extractError(execute(makeUserRequest())));
-    // The fallback guest request fails with its own RateLimitError
-    expect(result._tag).toBe("RateLimitError");
+    return Effect.gen(function* () {
+      const result = yield* extractError(execute(makeUserRequest()));
+      // The fallback guest request fails with its own RateLimitError
+      expect(result._tag).toBe("RateLimitError");
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vitest";
 
 import {
   CookieManager,
@@ -412,199 +413,193 @@ describe("Tweet detail projections", () => {
 });
 
 describe("Tweet detail service", () => {
-  it("rejects tweet detail lookup when no authenticated session is restored", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("rejects tweet detail lookup when no authenticated session is restored", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const tweets = yield* TwitterTweets;
           return yield* tweets.getTweet("thread-root");
-        }).pipe(Effect.provide(tweetsTestLayer({}))),
-      ),
-    ).rejects.toMatchObject({
-      _tag: "AuthenticationError",
-      reason:
-        "Authenticated tweet detail lookup requires restored session cookies.",
-    });
-  });
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "AuthenticationError",
+        reason:
+          "Authenticated tweet detail lookup requires restored session cookies.",
+      });
+    }).pipe(Effect.provide(tweetsTestLayer({}))),
+  );
 
-  it("rejects thread lookup when no authenticated session is restored", async () => {
-    await expect(
-      Effect.runPromise(
+  it.effect("rejects thread lookup when no authenticated session is restored", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
         Effect.gen(function* () {
           const tweets = yield* TwitterTweets;
           return yield* tweets.getThread("thread-root");
-        }).pipe(Effect.provide(tweetsTestLayer({}))),
-      ),
-    ).rejects.toMatchObject({
-      _tag: "AuthenticationError",
-      reason:
-        "Authenticated tweet detail lookup requires restored session cookies.",
-    });
-  });
+        }),
+      );
+      expect(error).toMatchObject({
+        _tag: "AuthenticationError",
+        reason:
+          "Authenticated tweet detail lookup requires restored session cookies.",
+      });
+    }).pipe(Effect.provide(tweetsTestLayer({}))),
+  );
 
-  it("loads tweet detail through the full authenticated layer stack", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const auth = yield* UserAuth;
-        const tweets = yield* TwitterTweets;
+  it.effect("loads tweet detail through the full authenticated layer stack", () =>
+    Effect.gen(function* () {
+      const auth = yield* UserAuth;
+      const tweets = yield* TwitterTweets;
 
-        yield* auth.restoreCookies(restoredSessionCookies);
+      yield* auth.restoreCookies(restoredSessionCookies);
 
-        const document = yield* tweets.getTweet("thread-root");
+      const document = yield* tweets.getTweet("thread-root");
 
-        expect(document.focalTweetId).toBe("thread-root");
-        expect(document.tweets.length).toBeGreaterThan(1);
-      }).pipe(
-        Effect.provide(
-          tweetsTestLayer(
-            {
-              [httpRequestKey(endpointRegistry.tweetDetail("thread-root"))]: [
-                { status: 200, json: tweetDetailFixture },
-              ],
-            },
-            {},
-          ),
+      expect(document.focalTweetId).toBe("thread-root");
+      expect(document.tweets.length).toBeGreaterThan(1);
+    }).pipe(
+      Effect.provide(
+        tweetsTestLayer(
+          {
+            [httpRequestKey(endpointRegistry.tweetDetail("thread-root"))]: [
+              { status: 200, json: tweetDetailFixture },
+            ],
+          },
+          {},
         ),
       ),
-    );
-  });
+    ),
+  );
 
-  it("projects the same self thread through getThread as the pure helper path", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const auth = yield* UserAuth;
-        const tweets = yield* TwitterTweets;
+  it.effect("projects the same self thread through getThread as the pure helper path", () =>
+    Effect.gen(function* () {
+      const auth = yield* UserAuth;
+      const tweets = yield* TwitterTweets;
 
-        yield* auth.restoreCookies(restoredSessionCookies);
+      yield* auth.restoreCookies(restoredSessionCookies);
 
-        const document = yield* tweets.getTweet("thread-root");
-        const thread = yield* tweets.getThread("thread-root");
+      const document = yield* tweets.getTweet("thread-root");
+      const thread = yield* tweets.getThread("thread-root");
 
-        expect(thread.map((tweet) => tweet.id)).toEqual(
-          getSelfThread(document).map((tweet) => tweet.id),
-        );
-      }).pipe(
-        Effect.provide(
-          tweetsTestLayer(
-            {
-              [httpRequestKey(endpointRegistry.tweetDetail("thread-root"))]: [
-                { status: 200, json: tweetDetailFixture },
-                { status: 200, json: tweetDetailFixture },
-              ],
-            },
-            {},
-          ),
+      expect(thread.map((tweet) => tweet.id)).toEqual(
+        getSelfThread(document).map((tweet) => tweet.id),
+      );
+    }).pipe(
+      Effect.provide(
+        tweetsTestLayer(
+          {
+            [httpRequestKey(endpointRegistry.tweetDetail("thread-root"))]: [
+              { status: 200, json: tweetDetailFixture },
+              { status: 200, json: tweetDetailFixture },
+            ],
+          },
+          {},
         ),
       ),
-    );
-  });
+    ),
+  );
 
-  it("retries a 429 tweet detail response once and records user-mode observability context", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const auth = yield* UserAuth;
-        const capture = yield* ObservabilityCapture;
-        const tweets = yield* TwitterTweets;
+  it.live("retries a 429 tweet detail response once and records user-mode observability context", () =>
+    Effect.gen(function* () {
+      const auth = yield* UserAuth;
+      const capture = yield* ObservabilityCapture;
+      const tweets = yield* TwitterTweets;
 
-        yield* auth.restoreCookies(restoredSessionCookies);
+      yield* auth.restoreCookies(restoredSessionCookies);
 
-        const document = yield* tweets.getTweet("thread-root");
-        const logs = yield* capture.logs;
-        const spans = yield* capture.spans;
+      const document = yield* tweets.getTweet("thread-root");
+      const logs = yield* capture.logs;
+      const spans = yield* capture.spans;
 
-        expect(document.focalTweetId).toBe("thread-root");
-        expect(
-          matchingLogs(logs, "429 retry scheduled").map(
-            (entry) => entry.annotations.endpoint_id,
-          ),
-        ).toContain("TweetDetail");
-        expect(spans).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              attributes: expect.objectContaining({
-                auth_mode: "user",
-                endpoint_id: "TweetDetail",
-                rate_limit_bucket: "tweetDetail",
-              }),
-              name: "ScraperStrategy.execute",
+      expect(document.focalTweetId).toBe("thread-root");
+      expect(
+        matchingLogs(logs, "429 retry scheduled").map(
+          (entry) => entry.annotations.endpoint_id,
+        ),
+      ).toContain("TweetDetail");
+      expect(spans).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            attributes: expect.objectContaining({
+              auth_mode: "user",
+              endpoint_id: "TweetDetail",
+              rate_limit_bucket: "tweetDetail",
             }),
-            expect.objectContaining({
-              name: "TwitterTweets.getTweet",
-            }),
-            expect.objectContaining({
-              name: "TwitterTweets.fetchTweetDetail",
-            }),
-          ]),
-        );
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            tweetsTestLayer({
-              [httpRequestKey(endpointRegistry.tweetDetail("thread-root"))]: [
-                { status: 429, bodyText: "rate limited" },
-                { status: 200, json: tweetDetailFixture },
-              ],
-            }),
-            ObservabilityCapture.layer(),
-          ),
+            name: "ScraperStrategy.execute",
+          }),
+          expect.objectContaining({
+            name: "TwitterTweets.getTweet",
+          }),
+          expect.objectContaining({
+            name: "TwitterTweets.fetchTweetDetail",
+          }),
+        ]),
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          tweetsTestLayer({
+            [httpRequestKey(endpointRegistry.tweetDetail("thread-root"))]: [
+              { status: 429, bodyText: "rate limited" },
+              { status: 200, json: tweetDetailFixture },
+            ],
+          }),
+          ObservabilityCapture.layer(),
         ),
       ),
-    );
-  });
+    ),
+  );
 
-  it("retries a 429 thread lookup once and keeps tweet detail observability context underneath", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const auth = yield* UserAuth;
-        const capture = yield* ObservabilityCapture;
-        const tweets = yield* TwitterTweets;
+  it.live("retries a 429 thread lookup once and keeps tweet detail observability context underneath", () =>
+    Effect.gen(function* () {
+      const auth = yield* UserAuth;
+      const capture = yield* ObservabilityCapture;
+      const tweets = yield* TwitterTweets;
 
-        yield* auth.restoreCookies(restoredSessionCookies);
+      yield* auth.restoreCookies(restoredSessionCookies);
 
-        const thread = yield* tweets.getThread("thread-root");
-        const logs = yield* capture.logs;
-        const spans = yield* capture.spans;
+      const thread = yield* tweets.getThread("thread-root");
+      const logs = yield* capture.logs;
+      const spans = yield* capture.spans;
 
-        expect(thread.map((tweet) => tweet.id)).toEqual([
-          "thread-root",
-          "thread-child",
-        ]);
-        expect(
-          matchingLogs(logs, "429 retry scheduled").map(
-            (entry) => entry.annotations.rate_limit_bucket,
-          ),
-        ).toContain("tweetDetail");
-        expect(spans).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              attributes: expect.objectContaining({
-                auth_mode: "user",
-                endpoint_id: "TweetDetail",
-                rate_limit_bucket: "tweetDetail",
-              }),
-              name: "ScraperStrategy.execute",
+      expect(thread.map((tweet) => tweet.id)).toEqual([
+        "thread-root",
+        "thread-child",
+      ]);
+      expect(
+        matchingLogs(logs, "429 retry scheduled").map(
+          (entry) => entry.annotations.rate_limit_bucket,
+        ),
+      ).toContain("tweetDetail");
+      expect(spans).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            attributes: expect.objectContaining({
+              auth_mode: "user",
+              endpoint_id: "TweetDetail",
+              rate_limit_bucket: "tweetDetail",
             }),
-            expect.objectContaining({
-              name: "TwitterTweets.getThread",
-            }),
-            expect.objectContaining({
-              name: "TwitterTweets.getTweet",
-            }),
-          ]),
-        );
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            tweetsTestLayer({
-              [httpRequestKey(endpointRegistry.tweetDetail("thread-root"))]: [
-                { status: 429, bodyText: "rate limited" },
-                { status: 200, json: tweetDetailFixture },
-              ],
-            }),
-            ObservabilityCapture.layer(),
-          ),
+            name: "ScraperStrategy.execute",
+          }),
+          expect.objectContaining({
+            name: "TwitterTweets.getThread",
+          }),
+          expect.objectContaining({
+            name: "TwitterTweets.getTweet",
+          }),
+        ]),
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          tweetsTestLayer({
+            [httpRequestKey(endpointRegistry.tweetDetail("thread-root"))]: [
+              { status: 429, bodyText: "rate limited" },
+              { status: 200, json: tweetDetailFixture },
+            ],
+          }),
+          ObservabilityCapture.layer(),
         ),
       ),
-    );
-  });
+    ),
+  );
 });

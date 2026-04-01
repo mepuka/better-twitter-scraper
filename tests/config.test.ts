@@ -1,5 +1,6 @@
 import { Effect, Redacted } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { it } from "@effect/vitest";
+import { afterEach, describe, expect } from "vitest";
 
 import { TwitterConfig } from "../index";
 
@@ -10,47 +11,43 @@ afterEach(() => {
 });
 
 describe("TwitterConfig", () => {
-  it("loads required env config and keeps bearer tokens redacted", async () => {
+  it.effect("loads required env config and keeps bearer tokens redacted", () => {
     process.env.TWITTER_BEARER_TOKEN = "env-default-token";
     process.env.TWITTER_BEARER_TOKEN_SECONDARY = "env-secondary-token";
 
-    const config = await Effect.runPromise(
-      Effect.gen(function* () {
-        return yield* TwitterConfig;
-      }).pipe(Effect.provide(TwitterConfig.fromEnvLayer)),
-    );
+    return Effect.gen(function* () {
+      const config = yield* TwitterConfig;
 
-    expect(Redacted.value(config.bearerTokens.default)).toBe("env-default-token");
-    expect(Redacted.value(config.bearerTokens.secondary)).toBe(
-      "env-secondary-token",
-    );
-    expect(String(config.bearerTokens.default)).toContain("redacted");
-    expect(config.timeline.defaultLimit).toBe(20);
-    expect(config.search.maxPageSize).toBe(50);
+      expect(Redacted.value(config.bearerTokens.default)).toBe("env-default-token");
+      expect(Redacted.value(config.bearerTokens.secondary)).toBe(
+        "env-secondary-token",
+      );
+      expect(String(config.bearerTokens.default)).toContain("redacted");
+      expect(config.timeline.defaultLimit).toBe(20);
+      expect(config.search.maxPageSize).toBe(50);
+    }).pipe(Effect.provide(TwitterConfig.fromEnvLayer));
   });
 
-  it("supports deterministic overrides through the test layer", async () => {
-    const config = await Effect.runPromise(
-      Effect.gen(function* () {
-        return yield* TwitterConfig;
-      }).pipe(
-        Effect.provide(
-          TwitterConfig.testLayer({
-            proxyUrl: "http://localhost:9999",
-            timeline: {
-              defaultLimit: 5,
-            },
-            search: {
-              maxPageSize: 10,
-            },
-          }),
-        ),
+  it.effect("supports deterministic overrides through the test layer", () =>
+    Effect.gen(function* () {
+      const config = yield* TwitterConfig;
+
+      expect(config.proxyUrl).toBe("http://localhost:9999");
+      expect(config.timeline.defaultLimit).toBe(5);
+      expect(config.timeline.maxPageSize).toBe(40);
+      expect(config.search.maxPageSize).toBe(10);
+    }).pipe(
+      Effect.provide(
+        TwitterConfig.testLayer({
+          proxyUrl: "http://localhost:9999",
+          timeline: {
+            defaultLimit: 5,
+          },
+          search: {
+            maxPageSize: 10,
+          },
+        }),
       ),
-    );
-
-    expect(config.proxyUrl).toBe("http://localhost:9999");
-    expect(config.timeline.defaultLimit).toBe(5);
-    expect(config.timeline.maxPageSize).toBe(40);
-    expect(config.search.maxPageSize).toBe(10);
-  });
+    ),
+  );
 });

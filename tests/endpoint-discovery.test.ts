@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
-import { describe, expect, it, afterEach } from "vitest";
+import { it } from "@effect/vitest";
+import { describe, expect, afterEach } from "vitest";
 
 import { TwitterConfig, TwitterHttpClient } from "../index";
 import {
@@ -168,38 +169,34 @@ describe("TwitterEndpointDiscovery service", () => {
       Layer.provideMerge(TwitterConfig.testLayer()),
     );
 
-  it("discovers query IDs from scripted x.com and JS bundles", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const discovery = yield* TwitterEndpointDiscovery;
-        const ids = yield* discovery.discoverQueryIds();
+  it.effect("discovers query IDs from scripted x.com and JS bundles", () =>
+    Effect.gen(function* () {
+      const discovery = yield* TwitterEndpointDiscovery;
+      const ids = yield* discovery.discoverQueryIds();
 
-        expect(ids.get("UserByScreenName")).toBe("disc_ABC");
-        expect(ids.get("TweetDetail")).toBe("disc_DEF");
-        expect(ids.get("Followers")).toBe("disc_GHI");
-        expect(ids.size).toBe(3);
-      }).pipe(Effect.provide(discoveryTestLayer(makeDiscoveryScript()))),
-    );
-  });
+      expect(ids.get("UserByScreenName")).toBe("disc_ABC");
+      expect(ids.get("TweetDetail")).toBe("disc_DEF");
+      expect(ids.get("Followers")).toBe("disc_GHI");
+      expect(ids.size).toBe(3);
+    }).pipe(Effect.provide(discoveryTestLayer(makeDiscoveryScript()))),
+  );
 
-  it("returns empty map when no scripts found in HTML", async () => {
+  it.effect("returns empty map when no scripts found in HTML", () => {
     const script: HttpScript = {
       ["GET https://x.com/"]: [
         { status: 200, bodyText: "<html><body>No scripts</body></html>" },
       ],
     };
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const discovery = yield* TwitterEndpointDiscovery;
-        const ids = yield* discovery.discoverQueryIds();
+    return Effect.gen(function* () {
+      const discovery = yield* TwitterEndpointDiscovery;
+      const ids = yield* discovery.discoverQueryIds();
 
-        expect(ids.size).toBe(0);
-      }).pipe(Effect.provide(discoveryTestLayer(script))),
-    );
+      expect(ids.size).toBe(0);
+    }).pipe(Effect.provide(discoveryTestLayer(script)));
   });
 
-  it("gracefully handles a bundle fetch failure", async () => {
+  it.effect("gracefully handles a bundle fetch failure", () => {
     const script: HttpScript = {
       ["GET https://x.com/"]: [
         { status: 200, bodyText: homeHtml },
@@ -209,42 +206,36 @@ describe("TwitterEndpointDiscovery service", () => {
       ],
     };
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const discovery = yield* TwitterEndpointDiscovery;
-        // Bundle fetch fails -> orElseSucceed("") -> no endpoints extracted
-        // But the overall discovery doesn't fail — it returns what it could find
-        const ids = yield* discovery.discoverQueryIds();
-        expect(ids.size).toBe(0);
-      }).pipe(Effect.provide(discoveryTestLayer(script))),
-    );
+    return Effect.gen(function* () {
+      const discovery = yield* TwitterEndpointDiscovery;
+      // Bundle fetch fails -> orElseSucceed("") -> no endpoints extracted
+      // But the overall discovery doesn't fail — it returns what it could find
+      const ids = yield* discovery.discoverQueryIds();
+      expect(ids.size).toBe(0);
+    }).pipe(Effect.provide(discoveryTestLayer(script)));
   });
 
-  it("test layer returns provided query IDs", async () => {
+  it.effect("test layer returns provided query IDs", () => {
     const testIds = new Map([
       ["UserByScreenName", "test_id_1"],
       ["TweetDetail", "test_id_2"],
     ]);
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const discovery = yield* TwitterEndpointDiscovery;
-        const ids = yield* discovery.discoverQueryIds();
+    return Effect.gen(function* () {
+      const discovery = yield* TwitterEndpointDiscovery;
+      const ids = yield* discovery.discoverQueryIds();
 
-        expect(ids.get("UserByScreenName")).toBe("test_id_1");
-        expect(ids.get("TweetDetail")).toBe("test_id_2");
-      }).pipe(Effect.provide(TwitterEndpointDiscovery.testLayer(testIds))),
-    );
+      expect(ids.get("UserByScreenName")).toBe("test_id_1");
+      expect(ids.get("TweetDetail")).toBe("test_id_2");
+    }).pipe(Effect.provide(TwitterEndpointDiscovery.testLayer(testIds)));
   });
 
-  it("disabled layer returns empty map", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const discovery = yield* TwitterEndpointDiscovery;
-        const ids = yield* discovery.discoverQueryIds();
+  it.effect("disabled layer returns empty map", () =>
+    Effect.gen(function* () {
+      const discovery = yield* TwitterEndpointDiscovery;
+      const ids = yield* discovery.discoverQueryIds();
 
-        expect(ids.size).toBe(0);
-      }).pipe(Effect.provide(TwitterEndpointDiscovery.disabledLayer)),
-    );
-  });
+      expect(ids.size).toBe(0);
+    }).pipe(Effect.provide(TwitterEndpointDiscovery.disabledLayer)),
+  );
 });
