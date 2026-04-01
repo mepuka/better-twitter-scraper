@@ -7,7 +7,7 @@ import {
   findDuplicateCookieNames,
   type ChromeCookieRow,
   type SerializedCookieFixture,
-} from "../src/chrome-cookie-fixture";
+} from "../tests/chrome-cookie-fixture";
 
 const fixturePath = resolve(
   dirname(import.meta.dir),

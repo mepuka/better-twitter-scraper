@@ -4,7 +4,7 @@ import {
   decodeChromeCookieValue,
   dedupeCookieRows,
   findDuplicateCookieNames,
-} from "../src/chrome-cookie-fixture";
+} from "./chrome-cookie-fixture";
 
 describe("chrome cookie fixture helpers", () => {
   it("strips the version-24 domain prefix before decoding the cookie value", () => {

@@ -9,6 +9,7 @@ interface PaginationState {
 
 export const paginateTimeline = <T, E>(options: {
   readonly remaining: number;
+  readonly jitterMs?: number;
   readonly fetchPage: (
     cursor: string | undefined,
     remaining: number,
@@ -26,6 +27,9 @@ export const paginateTimeline = <T, E>(options: {
       }
 
       return Effect.gen(function* () {
+        if (state.cursor !== undefined && options.jitterMs && options.jitterMs > 0) {
+          yield* Effect.sleep(`${Math.floor(Math.random() * options.jitterMs)} millis`);
+        }
         const page = yield* options.fetchPage(state.cursor, state.remaining);
         const items = page.items.slice(0, state.remaining);
         const duplicateCursor =
