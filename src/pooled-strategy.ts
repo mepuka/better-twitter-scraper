@@ -7,6 +7,7 @@ import { updateQueryIds } from "./endpoints";
 import { AuthenticationError } from "./errors";
 import { TwitterHttpClient } from "./http";
 import { logDebugDecision, TransportMetadata } from "./observability";
+import type { BucketState } from "./rate-limiter";
 import type { RateLimitBucket } from "./request";
 import {
   createSessionCapsule,
@@ -84,7 +85,23 @@ const sortByRateLimitState = (
       ),
     );
 
-    const now = Math.floor(Date.now() / 1000);
+    const nowEpochSec = Math.floor(Date.now() / 1000);
+    const nowMs = Date.now();
+
+    const isAvailable = (s: BucketState) => {
+      // A session is blocked if blockedUntil is in the future
+      if (s.blockedUntil !== undefined && s.blockedUntil > nowMs) return false;
+      // Or if reset is in the future and remaining is 0
+      if (s.reset !== undefined && s.reset > nowEpochSec && s.remaining === 0) return false;
+      return true;
+    };
+
+    const availableAt = (s: BucketState) => {
+      // When will this session next be available? (in ms from epoch)
+      const resetMs = s.reset !== undefined ? s.reset * 1000 : Infinity;
+      const blockedMs = s.blockedUntil ?? Infinity;
+      return Math.min(resetMs, blockedMs);
+    };
 
     return withState
       .sort((a, b) => {
@@ -93,23 +110,20 @@ const sortByRateLimitState = (
         if (!a.state) return -1;
         if (!b.state) return 1;
 
-        // Past reset = available
-        const aAvailable =
-          a.state.reset !== undefined && a.state.reset <= now;
-        const bAvailable =
-          b.state.reset !== undefined && b.state.reset <= now;
-        if (aAvailable && !bAvailable) return -1;
-        if (!aAvailable && bAvailable) return 1;
+        const aOk = isAvailable(a.state);
+        const bOk = isAvailable(b.state);
+        if (aOk && !bOk) return -1;
+        if (!aOk && bOk) return 1;
 
-        // More remaining = better
-        const aRemaining = a.state.remaining ?? Infinity;
-        const bRemaining = b.state.remaining ?? Infinity;
-        if (aRemaining !== bRemaining) return bRemaining - aRemaining;
+        if (aOk && bOk) {
+          // Both available — prefer more remaining headroom
+          const aRemaining = a.state.remaining ?? Infinity;
+          const bRemaining = b.state.remaining ?? Infinity;
+          return bRemaining - aRemaining;
+        }
 
-        // Earlier reset = better (will be available sooner)
-        const aReset = a.state.reset ?? Infinity;
-        const bReset = b.state.reset ?? Infinity;
-        return aReset - bReset;
+        // Both unavailable — prefer the one that becomes available soonest
+        return availableAt(a.state) - availableAt(b.state);
       })
       .map((x) => x.capsule);
   });
@@ -184,13 +198,13 @@ export class PooledScraperStrategy {
           const makeRotationHandler = (
             errorTag: string,
           ) =>
-            () =>
+            (error: StrategyError) =>
               logDebugDecision("Session failed, rotating to next", {
                 session_id: capsuleId,
                 error_tag: errorTag,
               }).pipe(
                 Effect.flatMap(() =>
-                  tryNextCapsule(request, remaining),
+                  tryNextCapsule(request, remaining, error),
                 ),
               );
 
@@ -204,12 +218,15 @@ export class PooledScraperStrategy {
         const tryNextCapsule = <A>(
           request: import("./request").ApiRequest<A>,
           remaining: ReadonlyArray<SessionCapsule>,
+          lastError?: StrategyError,
         ): Effect.Effect<A, StrategyError> => {
           if (remaining.length === 0) {
+            // Return the last real error, not a synthetic one
             return Effect.fail(
-              new AuthenticationError({
-                reason: `All sessions in the pool exhausted for ${request.endpointId}.`,
-              }),
+              lastError ??
+                new AuthenticationError({
+                  reason: `No sessions available in the pool for ${request.endpointId}.`,
+                }),
             ) as Effect.Effect<A, StrategyError>;
           }
 

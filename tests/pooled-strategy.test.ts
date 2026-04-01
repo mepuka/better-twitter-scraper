@@ -214,38 +214,57 @@ describe("PooledScraperStrategy", () => {
     "selection prefers session with most rate limit headroom",
     () =>
       Effect.gen(function* () {
-        // We set up 2 sessions. Session 0 has exhausted rate limit,
-        // session 1 has remaining quota. The pool should try session 1 first.
-        // We only provide one successful response — if the wrong session is
-        // tried first it will fail.
         const strategy = yield* ScraperStrategy;
-        const manager = yield* SessionPoolManager;
 
-        // Get snapshot to verify we have 2 sessions
-        const snap = yield* manager.snapshot;
-        expect(snap.length).toBe(2);
+        // First request: session 0 is picked (both are fresh).
+        // The response includes headers that mark session 0 as nearly exhausted.
+        const r1 = yield* strategy.execute(makeUserRequest());
+        expect(JSON.parse(r1)).toEqual({ data: "first" });
 
-        const result = yield* strategy.execute(makeUserRequest());
-        expect(JSON.parse(result)).toEqual({ data: "from-session-1" });
+        // Second request: session 1 should now be preferred because session 0
+        // has remaining=1 while session 1 has no rate limit state (fully available).
+        const r2 = yield* strategy.execute(makeUserRequest());
+        expect(JSON.parse(r2)).toEqual({ data: "second" });
+
+        // Third request: session 1 now has state too (remaining=50), while
+        // session 0 has remaining=1. Session 1 is still preferred.
+        const r3 = yield* strategy.execute(makeUserRequest());
+        expect(JSON.parse(r3)).toEqual({ data: "third-from-session-1" });
       }).pipe(
         Effect.provide(
-          (() => {
-            // Session 0 will get its rate limit noted BEFORE the execute call.
-            // We need to control this. Since we can't easily pre-set rate limit
-            // state externally, we use a different approach:
-            // Session 0 returns 399 (bot detection, causes rotation), session 1
-            // returns success. This also validates rotation ordering.
-            const script: HttpScript = {
+          makePoolLayer(
+            {
               "GET https://api.x.com/graphql/test/UserTweets": [
-                { status: 399 }, // session 0 fails
-                { status: 200, json: { data: "from-session-1" } }, // session 1 succeeds
+                // Request 1: session 0, returns with remaining=1
+                {
+                  status: 200,
+                  json: { data: "first" },
+                  headers: {
+                    "x-rate-limit-limit": "100",
+                    "x-rate-limit-remaining": "1",
+                    "x-rate-limit-reset": String(
+                      Math.floor(Date.now() / 1000) + 900,
+                    ),
+                  },
+                },
+                // Request 2: session 1 (preferred, no state), returns with remaining=50
+                {
+                  status: 200,
+                  json: { data: "second" },
+                  headers: {
+                    "x-rate-limit-limit": "100",
+                    "x-rate-limit-remaining": "50",
+                    "x-rate-limit-reset": String(
+                      Math.floor(Date.now() / 1000) + 900,
+                    ),
+                  },
+                },
+                // Request 3: session 1 still preferred (50 > 1)
+                { status: 200, json: { data: "third-from-session-1" } },
               ],
-            };
-            return makePoolLayer(script, [
-              userCookies("a"),
-              userCookies("b"),
-            ]);
-          })(),
+            },
+            [userCookies("a"), userCookies("b")],
+          ),
         ),
       ),
   );
@@ -285,6 +304,29 @@ describe("PooledScraperStrategy", () => {
               ],
             },
             [], // start with empty pool
+          ),
+        ),
+      ),
+  );
+
+  it.effect(
+    "all sessions bot-detected returns the last BotDetectionError, not AuthenticationError",
+    () =>
+      Effect.gen(function* () {
+        const strategy = yield* ScraperStrategy;
+        const error = yield* extractError(strategy.execute(makeUserRequest()));
+        // Should be BotDetectionError from the last session, not a synthetic AuthenticationError
+        expect(error._tag).toBe("BotDetectionError");
+      }).pipe(
+        Effect.provide(
+          makePoolLayer(
+            {
+              "GET https://api.x.com/graphql/test/UserTweets": [
+                { status: 399 }, // session 0 bot-detected
+                { status: 399 }, // session 1 bot-detected
+              ],
+            },
+            [userCookies("a"), userCookies("b")],
           ),
         ),
       ),
