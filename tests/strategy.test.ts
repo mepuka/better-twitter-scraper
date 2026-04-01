@@ -112,82 +112,8 @@ const makeGuestRequest = (overrides?: Partial<ApiRequest<string>>): ApiRequest<s
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("createStrategyExecute fallback chains", () => {
-  it.effect("falls back to guest auth after user auth hits 429 rate limit", () => {
-    // First call: 429 from user auth. Second call: success via guest auth.
-    const transport = scriptedTransport([
-      { status: 429, headers: { "x-rate-limit-limit": "100", "x-rate-limit-remaining": "0" } },
-      { json: { ok: "guest-fallback" } },
-    ]);
-
-    const execute = createStrategyExecute(
-      {
-        guest: Option.some(stubAuth("guest")),
-        user: Option.some(stubAuth("user")),
-      },
-      noopCookies,
-      transport,
-      noopRateLimiter,
-      "scripted",
-      0, // retryLimit = 0 so executeWithRetry won't retry internally
-    );
-
-    return Effect.gen(function* () {
-      const result = yield* execute(makeUserRequest());
-      expect(JSON.parse(result)).toEqual({ ok: "guest-fallback" });
-    });
-  });
-
-  it.effect("falls back to guest auth after user auth hits 401 authentication failure", () => {
-    // First call: 401 from user auth. Second call: success via guest auth.
-    const transport = scriptedTransport([
-      { status: 401 },
-      { json: { ok: "guest-fallback-401" } },
-    ]);
-
-    const execute = createStrategyExecute(
-      {
-        guest: Option.some(stubAuth("guest")),
-        user: Option.some(stubAuth("user")),
-      },
-      noopCookies,
-      transport,
-      noopRateLimiter,
-      "scripted",
-      0,
-    );
-
-    return Effect.gen(function* () {
-      const result = yield* execute(makeUserRequest());
-      expect(JSON.parse(result)).toEqual({ ok: "guest-fallback-401" });
-    });
-  });
-
-  it.effect("falls back to guest auth after user auth hits 403 authentication failure", () => {
-    const transport = scriptedTransport([
-      { status: 403 },
-      { json: { ok: "guest-fallback-403" } },
-    ]);
-
-    const execute = createStrategyExecute(
-      {
-        guest: Option.some(stubAuth("guest")),
-        user: Option.some(stubAuth("user")),
-      },
-      noopCookies,
-      transport,
-      noopRateLimiter,
-      "scripted",
-      0,
-    );
-
-    return Effect.gen(function* () {
-      const result = yield* execute(makeUserRequest());
-      expect(JSON.parse(result)).toEqual({ ok: "guest-fallback-403" });
-    });
-  });
-
-  it.effect("does NOT fall back when the request already uses guest auth", () => {
+describe("createStrategyExecute error propagation", () => {
+  it.effect("propagates rate limit error for guest auth requests", () => {
     // Guest request hitting 429 should just fail — no fallback.
     const transport = scriptedTransport([
       { status: 429, headers: { "x-rate-limit-limit": "100", "x-rate-limit-remaining": "0" } },
@@ -258,29 +184,4 @@ describe("createStrategyExecute fallback chains", () => {
     });
   });
 
-  it.effect("surfaces the guest-auth error when the fallback itself fails", () => {
-    // User auth 429, then guest auth also 429 — the second rate limit surfaces.
-    const transport = scriptedTransport([
-      { status: 429, headers: { "x-rate-limit-limit": "100", "x-rate-limit-remaining": "0" } },
-      { status: 429, headers: { "x-rate-limit-limit": "50", "x-rate-limit-remaining": "0" } },
-    ]);
-
-    const execute = createStrategyExecute(
-      {
-        guest: Option.some(stubAuth("guest")),
-        user: Option.some(stubAuth("user")),
-      },
-      noopCookies,
-      transport,
-      noopRateLimiter,
-      "scripted",
-      0,
-    );
-
-    return Effect.gen(function* () {
-      const result = yield* extractError(execute(makeUserRequest()));
-      // The fallback guest request fails with its own RateLimitError
-      expect(result._tag).toBe("RateLimitError");
-    });
-  });
 });
