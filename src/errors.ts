@@ -1,62 +1,79 @@
-import { Data } from "effect";
+import { Schema } from "effect";
 
-import type { RateLimitBucket } from "./request";
+export class TransportError extends Schema.TaggedErrorClass<TransportError>()(
+  "TransportError",
+  {
+    url: Schema.String,
+    reason: Schema.String,
+    error: Schema.Defect,
+  },
+) {}
 
-export class TransportError extends Data.TaggedError("TransportError")<{
-  readonly url: string;
-  readonly reason: string;
-  readonly error: unknown;
-}> {}
+export class GuestTokenError extends Schema.TaggedErrorClass<GuestTokenError>()(
+  "GuestTokenError",
+  {
+    reason: Schema.String,
+  },
+) {}
 
-export class GuestTokenError extends Data.TaggedError("GuestTokenError")<{
-  readonly reason: string;
-}> {}
+export class HttpStatusError extends Schema.TaggedErrorClass<HttpStatusError>()(
+  "HttpStatusError",
+  {
+    endpointId: Schema.String,
+    status: Schema.Number,
+    body: Schema.String,
+    headers: Schema.Record(Schema.String, Schema.String),
+  },
+) {}
 
-export class HttpStatusError extends Data.TaggedError("HttpStatusError")<{
-  readonly endpointId: string;
-  readonly status: number;
-  readonly body: string;
-  readonly headers: Readonly<Record<string, string>>;
-}> {}
+export class RateLimitError extends Schema.TaggedErrorClass<RateLimitError>()(
+  "RateLimitError",
+  {
+    endpointId: Schema.String,
+    bucket: Schema.String,
+    status: Schema.Number,
+    body: Schema.String,
+    limit: Schema.optionalKey(Schema.Number),
+    remaining: Schema.optionalKey(Schema.Number),
+    reset: Schema.optionalKey(Schema.Number),
+  },
+) {}
 
-export class RateLimitError extends Data.TaggedError("RateLimitError")<{
-  readonly endpointId: string;
-  readonly bucket: RateLimitBucket;
-  readonly status: number;
-  readonly body: string;
-  readonly limit?: number;
-  readonly remaining?: number;
-  readonly reset?: number;
-}> {}
+export class BotDetectionError extends Schema.TaggedErrorClass<BotDetectionError>()(
+  "BotDetectionError",
+  {
+    endpointId: Schema.String,
+    status: Schema.Number,
+    body: Schema.String,
+    reason: Schema.String,
+  },
+) {}
 
-export class BotDetectionError extends Data.TaggedError("BotDetectionError")<{
-  readonly endpointId: string;
-  readonly status: number;
-  readonly body: string;
-  readonly reason: "status_399" | "empty_404" | (string & {});
-}> {}
-
-export class InvalidResponseError extends Data.TaggedError(
+export class InvalidResponseError extends Schema.TaggedErrorClass<InvalidResponseError>()(
   "InvalidResponseError",
-)<{
-  readonly endpointId: string;
-  readonly reason: string;
-}> {}
+  {
+    endpointId: Schema.String,
+    reason: Schema.String,
+  },
+) {}
 
-export class ProfileNotFoundError extends Data.TaggedError(
+export class ProfileNotFoundError extends Schema.TaggedErrorClass<ProfileNotFoundError>()(
   "ProfileNotFoundError",
-)<{
-  readonly username: string;
-}> {}
+  {
+    username: Schema.String,
+  },
+) {}
 
-export class TweetNotFoundError extends Data.TaggedError(
+export class TweetNotFoundError extends Schema.TaggedErrorClass<TweetNotFoundError>()(
   "TweetNotFoundError",
-)<{
-  readonly id: string;
-}> {}
+  {
+    id: Schema.String,
+  },
+) {}
 
-export class AuthenticationError extends Data.TaggedError(
+export class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationError>()(
   "AuthenticationError",
-)<{
-  readonly reason: string;
-}> {}
+  {
+    reason: Schema.String,
+  },
+) {}
