@@ -83,111 +83,113 @@ const updateBucketState = (
   };
 };
 
+export type RateLimiterInstance = {
+  readonly awaitReady: (
+    bucket: RateLimitBucket,
+  ) => Effect.Effect<void>;
+  readonly noteRateLimit: (
+    error: RateLimitError,
+  ) => Effect.Effect<void>;
+  readonly noteResponse: (
+    options: {
+      readonly bucket: RateLimitBucket;
+      readonly headers: Readonly<Record<string, string>>;
+    },
+  ) => Effect.Effect<{
+    readonly incomingExhausted: boolean;
+  }>;
+  readonly snapshot: (
+    bucket: RateLimitBucket,
+  ) => Effect.Effect<BucketState | null>;
+};
+
+export const createRateLimiterInstance = () =>
+  Effect.gen(function* () {
+    const stateRef = yield* Ref.make({} as Readonly<Record<string, BucketState>>);
+
+    const awaitReady = Effect.fn("RateLimiter.awaitReady")(function* (
+      bucket: RateLimitBucket,
+    ) {
+      const current = yield* Ref.get(stateRef);
+      const bucketState = current[bucket];
+
+      if (!bucketState?.blockedUntil) {
+        return;
+      }
+
+      const now = yield* Clock.currentTimeMillis;
+      const waitMs = bucketState.blockedUntil - now;
+
+      if (waitMs > 0) {
+        yield* logDebugDecision("Rate limiter wait begins", {
+          rate_limit_bucket: bucket,
+          wait_ms: waitMs,
+        });
+        yield* Effect.sleep(Duration.millis(waitMs));
+      }
+    });
+
+    const noteResponse = Effect.fn("RateLimiter.noteResponse")(function* ({
+      bucket,
+      headers,
+    }: {
+      readonly bucket: RateLimitBucket;
+      readonly headers: Readonly<Record<string, string>>;
+    }) {
+      yield* Ref.update(stateRef, (current) =>
+        updateBucketState(
+          current,
+          bucket,
+          applyHeaderState(current[bucket], headers),
+        ),
+      );
+
+      return {
+        incomingExhausted: headers["x-rate-limit-incoming"] === "0",
+      } as const;
+    });
+
+    const noteRateLimit = Effect.fn("RateLimiter.noteRateLimit")(function* (
+      error: RateLimitError,
+    ) {
+      const now = yield* Clock.currentTimeMillis;
+      const blockedUntil =
+        error.reset !== undefined
+          ? error.reset * 1000
+          : now + Duration.toMillis(FALLBACK_RETRY_DELAY);
+
+      yield* Ref.update(stateRef, (current) =>
+        updateBucketState(current, error.bucket, {
+          blockedUntil,
+          ...(error.limit !== undefined ? { limit: error.limit } : {}),
+          ...(error.remaining !== undefined
+            ? { remaining: error.remaining }
+            : {}),
+          ...(error.reset !== undefined ? { reset: error.reset } : {}),
+        }),
+      );
+    });
+
+    const snapshot = Effect.fn("RateLimiter.snapshot")(function* (
+      bucket: RateLimitBucket,
+    ) {
+      const current = yield* Ref.get(stateRef);
+      return current[bucket] ?? null;
+    });
+
+    return {
+      awaitReady,
+      noteRateLimit,
+      noteResponse,
+      snapshot,
+    } satisfies RateLimiterInstance;
+  });
+
 export class RateLimiter extends ServiceMap.Service<
   RateLimiter,
-  {
-    readonly awaitReady: (
-      bucket: RateLimitBucket,
-    ) => Effect.Effect<void>;
-    readonly noteRateLimit: (
-      error: RateLimitError,
-    ) => Effect.Effect<void>;
-    readonly noteResponse: (
-      options: {
-        readonly bucket: RateLimitBucket;
-        readonly headers: Readonly<Record<string, string>>;
-      },
-    ) => Effect.Effect<{
-      readonly incomingExhausted: boolean;
-    }>;
-    readonly snapshot: (
-      bucket: RateLimitBucket,
-    ) => Effect.Effect<BucketState | null>;
-  }
+  RateLimiterInstance
 >()("@better-twitter-scraper/RateLimiter") {
   static get liveLayer() {
-    return Layer.effect(
-      RateLimiter,
-      Effect.gen(function* () {
-        const stateRef = yield* Ref.make({} as Readonly<Record<string, BucketState>>);
-
-        const awaitReady = Effect.fn("RateLimiter.awaitReady")(function* (
-          bucket: RateLimitBucket,
-        ) {
-          const current = yield* Ref.get(stateRef);
-          const bucketState = current[bucket];
-
-          if (!bucketState?.blockedUntil) {
-            return;
-          }
-
-          const now = yield* Clock.currentTimeMillis;
-          const waitMs = bucketState.blockedUntil - now;
-
-          if (waitMs > 0) {
-            yield* logDebugDecision("Rate limiter wait begins", {
-              rate_limit_bucket: bucket,
-              wait_ms: waitMs,
-            });
-            yield* Effect.sleep(Duration.millis(waitMs));
-          }
-        });
-
-        const noteResponse = Effect.fn("RateLimiter.noteResponse")(function* ({
-          bucket,
-          headers,
-        }: {
-          readonly bucket: RateLimitBucket;
-          readonly headers: Readonly<Record<string, string>>;
-        }) {
-          yield* Ref.update(stateRef, (current) =>
-            updateBucketState(
-              current,
-              bucket,
-              applyHeaderState(current[bucket], headers),
-            ),
-          );
-
-          return {
-            incomingExhausted: headers["x-rate-limit-incoming"] === "0",
-          } as const;
-        });
-
-        const noteRateLimit = Effect.fn("RateLimiter.noteRateLimit")(function* (
-          error: RateLimitError,
-        ) {
-          const now = yield* Clock.currentTimeMillis;
-          const blockedUntil =
-            error.reset !== undefined
-              ? error.reset * 1000
-              : now + Duration.toMillis(FALLBACK_RETRY_DELAY);
-
-          yield* Ref.update(stateRef, (current) =>
-            updateBucketState(current, error.bucket, {
-              blockedUntil,
-              ...(error.limit !== undefined ? { limit: error.limit } : {}),
-              ...(error.remaining !== undefined
-                ? { remaining: error.remaining }
-                : {}),
-              ...(error.reset !== undefined ? { reset: error.reset } : {}),
-            }),
-          );
-        });
-
-        const snapshot = Effect.fn("RateLimiter.snapshot")(function* (
-          bucket: RateLimitBucket,
-        ) {
-          const current = yield* Ref.get(stateRef);
-          return current[bucket] ?? null;
-        });
-
-        return {
-          awaitReady,
-          noteRateLimit,
-          noteResponse,
-          snapshot,
-        };
-      }),
-    );
+    return Layer.effect(RateLimiter, createRateLimiterInstance());
   }
 }

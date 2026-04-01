@@ -51,14 +51,38 @@ const generateXpffHeader = (guestId: string) =>
     ),
   );
 
+export type XpffInstance = {
+  readonly headerFor: () => Effect.Effect<
+    Readonly<Record<string, string>>,
+    InvalidResponseError
+  >;
+};
+
+export const createXpffInstance = (deps: {
+  readonly getCookie: (name: string) => Effect.Effect<string | undefined>;
+}) =>
+  Effect.gen(function* () {
+    const headerFor = Effect.fn("TwitterXpff.headerFor")(() =>
+      Effect.gen(function* () {
+        const guestId = yield* deps.getCookie("guest_id");
+
+        if (!guestId) {
+          return {};
+        }
+
+        const header = yield* generateXpffHeader(guestId);
+        return {
+          "x-xp-forwarded-for": header,
+        } as const;
+      }).pipe(Effect.withSpan("TwitterXpff.headerFor")),
+    );
+
+    return { headerFor } satisfies XpffInstance;
+  });
+
 export class TwitterXpff extends ServiceMap.Service<
   TwitterXpff,
-  {
-    readonly headerFor: () => Effect.Effect<
-      Readonly<Record<string, string>>,
-      InvalidResponseError
-    >;
-  }
+  XpffInstance
 >()("@better-twitter-scraper/TwitterXpff") {
   static readonly disabledLayer = Layer.succeed(TwitterXpff, {
     headerFor: () => Effect.succeed({}),
@@ -77,23 +101,7 @@ export class TwitterXpff extends ServiceMap.Service<
     TwitterXpff,
     Effect.gen(function* () {
       const cookies = yield* CookieManager;
-
-      const headerFor = Effect.fn("TwitterXpff.headerFor")(() =>
-        Effect.gen(function* () {
-          const guestId = yield* cookies.get("guest_id");
-
-          if (!guestId) {
-            return {};
-          }
-
-          const header = yield* generateXpffHeader(guestId);
-          return {
-            "x-xp-forwarded-for": header,
-          } as const;
-        }).pipe(Effect.withSpan("TwitterXpff.headerFor")),
-      );
-
-      return { headerFor };
+      return yield* createXpffInstance({ getCookie: cookies.get });
     }),
   );
 }
