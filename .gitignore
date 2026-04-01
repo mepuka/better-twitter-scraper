@@ -35,3 +35,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # local live auth fixtures
 tests/live-auth-cookies.local.json
+
+# local browser discovery artifacts
+.playwright-cli/
+output/playwright/

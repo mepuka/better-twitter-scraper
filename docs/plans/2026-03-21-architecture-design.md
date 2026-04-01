@@ -682,6 +682,29 @@ Status:
 - Deterministic request, parser, auth rejection, 429 retry, and mixed-runtime tests are in place for the new buckets: `searchTweets`, `tweetsAndReplies`, `likedTweets`, and `trends`.
 - Live proof exists for tweet search, tweets-and-replies, and trends, with liked-tweets live proof enabled when `TWITTER_LIKES_CANARY_USER_ID` is provided.
 
+### Slice 4D — Thread Semantics and Bookmarks Gate
+
+Build:
+
+- pure thread projection helpers on top of `TweetDetailDocument`
+- `TwitterTweets.getThread(id)` as a thin wrapper over `getTweet(id)` plus self-thread projection
+- bookmarks discovery against the live signed-in site, with implementation gated on whether the flow fits the existing authenticated GraphQL path
+
+This slice proves:
+
+- the internal graph-backed `TweetDetail` normalization can support caller-facing thread semantics without adding a second fetch path
+- thread reconstruction can stay pure and acyclic at the document boundary while still giving callers parent / quote / retweet / reply-tree helpers
+- bookmarks are only added if the live site exposes a stable endpoint that fits the current signed-in strategy path
+
+Status:
+
+- `TweetDetailNode` now distinguishes `resolution: "full" | "reference"`, so relation-only placeholders are explicit instead of being indistinguishable from fully observed tweets.
+- Pure projection helpers now ship for focal tweet lookup, parent / quote / retweet resolution, self-thread reconstruction, direct replies, and reply-tree projection.
+- `TwitterTweets.getThread(id)` is implemented as a thin authenticated wrapper over `getTweet(id)` and the pure self-thread projection.
+- Deterministic tests now cover placeholder promotion, projection ordering, cycle resistance, and `getThread(id)` behavior.
+- Live proof now asserts root-first thread projection on the existing authenticated thread canary and also proves the `getThread(id)` convenience path.
+- Bookmarks discovery did **not** pass the implementation gate in the current codebase. The live signed-in X client currently exposes bookmark-related GraphQL metadata through a dynamic `BookmarkSearchTimeline` operation in client JavaScript, and direct requests using the discovered query id still reject with `400` without page-captured request shape. That means bookmarks would currently require page-level query-id / request-shape discovery beyond the stable signed-in GraphQL path already proven by search, relationships, tweet detail, and signed-in timelines. No public `TwitterBookmarks` service should ship until that discovery path is designed explicitly.
+
 ### Slice 5 — Password Login Automation and Direct Messages
 
 Build:

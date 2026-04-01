@@ -5,7 +5,8 @@ import { endpointRegistry } from "./endpoints";
 import { AuthenticationError, InvalidResponseError, TweetNotFoundError } from "./errors";
 import type { GetTweetsOptions, TimelinePage, Tweet } from "./models";
 import { ScraperStrategy, type StrategyError } from "./strategy";
-import { TweetDetailDocument } from "./tweet-detail-model";
+import { TweetDetailDocument, TweetDetailNode } from "./tweet-detail-model";
+import { getSelfThread } from "./tweet-detail-projections";
 import { UserAuth } from "./user-auth";
 
 type TweetDetailError =
@@ -29,6 +30,9 @@ export class TwitterTweets extends ServiceMap.Service<
     readonly getTweet: (
       id: string,
     ) => Effect.Effect<TweetDetailDocument, TweetDetailError>;
+    readonly getThread: (
+      id: string,
+    ) => Effect.Effect<readonly TweetDetailNode[], TweetDetailError>;
     readonly getTweetsAndReplies: (
       userId: string,
       options?: GetTweetsOptions,
@@ -87,6 +91,13 @@ export class TwitterTweets extends ServiceMap.Service<
 
           return yield* fetchTweetDetail(id);
         }).pipe(Effect.withSpan("TwitterTweets.getTweet")),
+      );
+
+      const getThread = Effect.fn("TwitterTweets.getThread")((id: string) =>
+        getTweet(id).pipe(
+          Effect.map((document) => getSelfThread(document)),
+          Effect.withSpan("TwitterTweets.getThread"),
+        ),
       );
 
       const streamTweets = (
@@ -183,6 +194,7 @@ export class TwitterTweets extends ServiceMap.Service<
 
       return {
         getTweet,
+        getThread,
         getTweetsAndReplies,
         getLikedTweets,
       };

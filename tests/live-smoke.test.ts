@@ -283,11 +283,54 @@ describe("Live authenticated smoke", () => {
             readonly endpointId: string;
           }>;
         };
+        readonly threadIds: readonly string[];
         readonly tweetCount: number;
       };
 
       expect(payload.focalTweetId).toBe("1665602315745673217");
       expect(payload.tweetCount).toBeGreaterThan(1);
+      expect(payload.threadIds.length).toBeGreaterThan(1);
+      expect(payload.threadIds[0]).toBe("1665602315745673217");
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "TweetDetail",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
+
+    it("projects a root-first thread through the convenience tweet thread API", async () => {
+      const result = spawnSync("bun", ["scripts/live-thread-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly threadIds: readonly string[];
+      };
+
+      expect(payload.threadIds.length).toBeGreaterThan(1);
+      expect(payload.threadIds[0]).toBe("1665602315745673217");
       expect(payload.observability.strategyCalls).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -473,6 +516,7 @@ describe("Live authenticated smoke", () => {
     it.skip("hosts guest and authenticated services together in one runtime", () => {});
     it.skip("loads followers through the mixed guest and authenticated runtime", () => {});
     it.skip("loads authenticated tweet detail for a thread canary", () => {});
+    it.skip("projects a root-first thread through the convenience tweet thread API", () => {});
     it.skip("searches tweets with restored cookies", () => {});
     it.skip("loads tweets-and-replies with restored cookies", () => {});
     it.skip("loads trends with restored cookies", () => {});

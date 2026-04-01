@@ -36,5 +36,6 @@
         "name": "@effect/language-service"
       }
     ]
-  }
+  },
+  "exclude": [".playwright-cli", "output"]
 }

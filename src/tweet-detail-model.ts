@@ -35,6 +35,9 @@ export class TweetVideo extends Schema.Class<TweetVideo>("TweetVideo")({
   url: Schema.optionalKey(Schema.String),
 }) {}
 
+export const TweetNodeResolution = Schema.Literals(["full", "reference"]);
+export type TweetNodeResolution = typeof TweetNodeResolution.Type;
+
 export const TweetRelationKind = Schema.Literals([
   "reply_to",
   "quotes",
@@ -71,6 +74,7 @@ export class TweetDetailNode extends Schema.Class<TweetDetailNode>(
   permanentUrl: Schema.optionalKey(Schema.String),
   photos: Schema.Array(TweetPhoto),
   place: Schema.optionalKey(TweetPlace),
+  resolution: TweetNodeResolution,
   replies: Schema.optionalKey(Schema.Number),
   retweets: Schema.optionalKey(Schema.Number),
   sensitiveContent: Schema.Boolean,
@@ -92,3 +96,18 @@ export class TweetDetailDocument extends Schema.Class<TweetDetailDocument>(
   relations: Schema.Array(TweetRelation),
   tweets: Schema.Array(TweetDetailNode),
 }) {}
+
+export interface TweetReplyTreeNode {
+  readonly replies: ReadonlyArray<TweetReplyTreeNode>;
+  readonly tweet: TweetDetailNode;
+}
+
+export const TweetReplyTreeNode: Schema.Schema<TweetReplyTreeNode> =
+  Schema.Struct({
+    replies: Schema.Array(
+      Schema.suspend(
+        (): Schema.Schema<TweetReplyTreeNode> => TweetReplyTreeNode,
+      ),
+    ),
+    tweet: TweetDetailNode,
+  });

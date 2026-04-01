@@ -409,6 +409,7 @@ const createPlaceholderNode = (id: string) =>
     isSelfThread: false,
     mentions: [],
     photos: [],
+    resolution: "reference",
     sensitiveContent: false,
     urls: [],
     versions: [id],
@@ -453,6 +454,10 @@ const mergeDetailNodes = (
         : {}),
     photos: uniquePhotos([...left.photos, ...right.photos]),
     ...(left.place ? { place: left.place } : right.place ? { place: right.place } : {}),
+    resolution:
+      left.resolution === "full" || right.resolution === "full"
+        ? "full"
+        : "reference",
     ...(left.replies !== undefined
       ? { replies: left.replies }
       : right.replies !== undefined
@@ -649,6 +654,7 @@ const parseTweetObservation = (
             },
           }
         : {}),
+      resolution: "full",
       ...(legacy.reply_count !== undefined ? { replies: legacy.reply_count } : {}),
       ...(legacy.retweet_count !== undefined
         ? { retweets: legacy.retweet_count }

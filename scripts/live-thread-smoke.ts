@@ -2,7 +2,6 @@ import { Effect, Layer } from "effect";
 
 import {
   CookieManager,
-  getSelfThread,
   ScraperStrategy,
   TwitterConfig,
   TwitterHttpClient,
@@ -14,7 +13,7 @@ import { ObservabilityCapture } from "../src/observability-capture";
 
 const THREAD_CANARY_TWEET_ID = "1665602315745673217";
 
-const liveTweetDetailLayer = TwitterTweets.layer.pipe(
+const liveThreadLayer = TwitterTweets.layer.pipe(
   Layer.provideMerge(ScraperStrategy.standardLayer),
   Layer.provideMerge(UserAuth.liveLayer),
   Layer.provideMerge(CookieManager.liveLayer),
@@ -47,22 +46,13 @@ const main = async () => {
         throw new Error("Restored cookies did not produce a signed-in session.");
       }
 
-      const document = yield* tweets.getTweet(THREAD_CANARY_TWEET_ID);
-      if (document.focalTweetId !== THREAD_CANARY_TWEET_ID) {
-        throw new Error("Tweet detail did not return the requested focal tweet.");
-      }
-
-      if (document.tweets.length <= 1) {
-        throw new Error("Tweet detail did not return a conversation graph.");
-      }
-
-      const thread = getSelfThread(document);
+      const thread = yield* tweets.getThread(THREAD_CANARY_TWEET_ID);
       if (thread.length <= 1) {
-        throw new Error("Tweet detail did not project a multi-tweet self thread.");
+        throw new Error("Thread lookup did not return a multi-tweet thread.");
       }
 
       if (thread[0]?.id !== THREAD_CANARY_TWEET_ID) {
-        throw new Error("Tweet detail did not project the canary thread root first.");
+        throw new Error("Thread lookup did not return the canary root first.");
       }
 
       const spans = yield* capture.spans;
@@ -74,16 +64,14 @@ const main = async () => {
         }));
 
       return {
-        focalTweetId: document.focalTweetId,
         observability: {
           strategyCalls,
         },
         threadIds: thread.map((tweet) => tweet.id),
-        tweetCount: document.tweets.length,
       };
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(liveTweetDetailLayer, ObservabilityCapture.layer()),
+        Layer.mergeAll(liveThreadLayer, ObservabilityCapture.layer()),
       ),
     ),
   );

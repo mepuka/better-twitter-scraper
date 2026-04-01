@@ -21,10 +21,21 @@ export { TwitterTrends } from "./src/trends";
 export {
   TweetDetailDocument,
   TweetDetailNode,
+  TweetNodeResolution,
   TweetPhoto,
   TweetRelation,
   TweetRelationKind,
+  TweetReplyTreeNode,
   TweetVideo,
 } from "./src/tweet-detail-model";
+export {
+  getDirectReplies,
+  getFocalTweet,
+  getParentTweet,
+  getQuotedTweet,
+  getReplyTree,
+  getRetweetedTweet,
+  getSelfThread,
+} from "./src/tweet-detail-projections";
 export { TwitterTweets } from "./src/tweets";
 export { UserAuth } from "./src/user-auth";
