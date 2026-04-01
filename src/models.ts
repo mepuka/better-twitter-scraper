@@ -1,5 +1,17 @@
-import { Schema } from "effect";
+import { Brand, Schema } from "effect";
 import { TweetPhoto, TweetVideo } from "./tweet-detail-model";
+
+export type UserId = string & Brand.Brand<"UserId">;
+export const UserId = Brand.nominal<UserId>();
+
+export type TweetId = string & Brand.Brand<"TweetId">;
+export const TweetId = Brand.nominal<TweetId>();
+
+export type ListId = string & Brand.Brand<"ListId">;
+export const ListId = Brand.nominal<ListId>();
+
+export type Username = string & Brand.Brand<"Username">;
+export const Username = Brand.nominal<Username>();
 
 export class Mention extends Schema.Class<Mention>("Mention")({
   id: Schema.String,

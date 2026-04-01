@@ -11,7 +11,7 @@ export { updateQueryIds, getQueryIds } from "./src/endpoints";
 export { GuestAuth } from "./src/guest-auth";
 export { TwitterHttpClient } from "./src/http";
 export type { HttpScript, ScriptedHttpResponse } from "./src/http";
-export { Mention, Profile, Tweet } from "./src/models";
+export { ListId, Mention, Profile, Tweet, TweetId, UserId, Username } from "./src/models";
 export type {
   GetProfilesOptions,
   GetTweetsOptions,
