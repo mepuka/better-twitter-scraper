@@ -1,43 +1,13 @@
+import type {
+  CoreUserRaw,
+  TimelineEntryItemContentRaw,
+  TimelineInstructionRaw,
+  TimelineResultRaw,
+} from "./api-types";
 import { InvalidResponseError, ProfileNotFoundError } from "./errors";
 import type { Profile, TimelinePage, Tweet } from "./models";
 import type { TweetDetailDocument } from "./tweet-detail-model";
 import { buildTweetDetailDocument } from "./tweet-detail-builder";
-
-interface UrlEntityRaw {
-  readonly expanded_url?: string;
-  readonly url?: string;
-}
-
-interface MentionRaw {
-  readonly id_str?: string;
-  readonly screen_name?: string;
-  readonly name?: string;
-}
-
-interface LegacyTweetRaw {
-  readonly id_str?: string;
-  readonly full_text?: string;
-  readonly created_at?: string;
-  readonly conversation_id_str?: string;
-  readonly user_id_str?: string;
-  readonly favorite_count?: number;
-  readonly reply_count?: number;
-  readonly retweet_count?: number;
-  readonly quoted_status_id_str?: string;
-  readonly in_reply_to_status_id_str?: string;
-  readonly retweeted_status_id_str?: string;
-  readonly entities?: {
-    readonly hashtags?: ReadonlyArray<{ readonly text?: string }>;
-    readonly urls?: ReadonlyArray<UrlEntityRaw>;
-    readonly user_mentions?: ReadonlyArray<MentionRaw>;
-  };
-}
-
-interface CoreUserRaw {
-  readonly created_at?: string;
-  readonly name?: string;
-  readonly screen_name?: string;
-}
 
 interface LegacyUserRaw {
   readonly created_at?: string;
@@ -86,60 +56,6 @@ interface UserByScreenNameResponse {
       };
     };
   };
-}
-
-interface TimelineResultRaw {
-  readonly __typename?: string;
-  readonly rest_id?: string;
-  readonly tweet?: TimelineResultRaw;
-  readonly legacy?: LegacyTweetRaw;
-  readonly core?: {
-    readonly user_results?: {
-      readonly result?: {
-        readonly legacy?: LegacyUserRaw;
-        readonly core?: CoreUserRaw;
-      };
-    };
-  };
-  readonly note_tweet?: {
-    readonly note_tweet_results?: {
-      readonly result?: {
-        readonly text?: string;
-      };
-    };
-  };
-  readonly views?: {
-    readonly count?: string;
-  };
-}
-
-interface TimelineEntryItemContentRaw {
-  readonly tweet_results?: {
-    readonly result?: TimelineResultRaw;
-  };
-  readonly tweetResult?: {
-    readonly result?: TimelineResultRaw;
-  };
-}
-
-interface TimelineEntryRaw {
-  readonly entryId: string;
-  readonly content?: {
-    readonly cursorType?: string;
-    readonly value?: string;
-    readonly itemContent?: TimelineEntryItemContentRaw;
-    readonly items?: ReadonlyArray<{
-      readonly item?: {
-        readonly itemContent?: TimelineEntryItemContentRaw;
-        readonly content?: TimelineEntryItemContentRaw;
-      };
-    }>;
-  };
-}
-
-interface TimelineInstructionRaw {
-  readonly entries?: ReadonlyArray<TimelineEntryRaw>;
-  readonly entry?: TimelineEntryRaw;
 }
 
 interface UserTweetsResponse {
