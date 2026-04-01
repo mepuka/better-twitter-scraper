@@ -5,7 +5,7 @@ import type {
   TimelineResultRaw,
 } from "./api-types";
 import { InvalidResponseError, ProfileNotFoundError, TweetNotFoundError } from "./errors";
-import type { Profile, TimelinePage, Tweet } from "./models";
+import { Mention, Profile, Tweet, type TimelinePage } from "./models";
 import { parseMediaGroups, parseTimestamp, reconstructTweetHtml } from "./parse-utils";
 import type { TweetDetailDocument } from "./tweet-detail-model";
 import { buildTweetDetailDocument } from "./tweet-detail-builder";
@@ -238,7 +238,7 @@ const parseTweet = (
   const isEdited =
     (result?.edit_control?.edit_control_initial?.edit_tweet_ids?.length ?? 0) > 1;
 
-  return {
+  return new Tweet({
     id,
     ...(legacy.conversation_id_str
       ? { conversationId: legacy.conversation_id_str }
@@ -251,13 +251,13 @@ const parseTweet = (
         ?.flatMap((mention) =>
           mention.id_str
             ? [
-                {
+                new Mention({
                   id: mention.id_str,
                   ...(mention.screen_name
                     ? { username: mention.screen_name }
                     : {}),
                   ...(mention.name ? { name: mention.name } : {}),
-                },
+                }),
               ]
             : [],
         ) ?? [],
@@ -302,7 +302,7 @@ const parseTweet = (
     ...(legacy.retweeted_status_id_str
       ? { retweetedTweetId: legacy.retweeted_status_id_str }
       : {}),
-  } as Tweet;
+  });
 };
 
 const parseUserProfile = (input: {
@@ -333,7 +333,7 @@ const parseUserProfile = (input: {
     legacy.profile_image_url_https ?? input.avatarUrl,
   );
 
-  return {
+  return new Profile({
     ...(avatar ? { avatar } : {}),
     ...(legacy.profile_banner_url ? { banner: legacy.profile_banner_url } : {}),
     ...(legacy.description ? { biography: legacy.description } : {}),
@@ -357,12 +357,14 @@ const parseUserProfile = (input: {
     ...(legacy.listed_count !== undefined
       ? { listedCount: legacy.listed_count }
       : {}),
-    ...(legacy.location ?? input.location
-      ? { location: legacy.location ?? input.location }
-      : {}),
-    ...(legacy.name ?? input.core?.name
-      ? { name: legacy.name ?? input.core?.name }
-      : {}),
+    ...(() => {
+      const loc = legacy.location ?? input.location;
+      return loc ? { location: loc } : {};
+    })(),
+    ...(() => {
+      const n = legacy.name ?? input.core?.name;
+      return n ? { name: n } : {};
+    })(),
     pinnedTweetIds: legacy.pinned_tweet_ids_str ?? [],
     url: `https://x.com/${screenName}`,
     userId,
@@ -371,7 +373,7 @@ const parseUserProfile = (input: {
       ? { website: legacy.entities.url.urls[0].expanded_url }
       : {}),
     ...(legacy.can_dm !== undefined ? { canDm: legacy.can_dm } : {}),
-  } as Profile;
+  });
 };
 
 export const parseProfileResponse = (

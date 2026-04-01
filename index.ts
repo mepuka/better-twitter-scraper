@@ -3,13 +3,12 @@ export { TwitterConfig } from "./src/config";
 export { GuestAuth } from "./src/guest-auth";
 export { TwitterHttpClient } from "./src/http";
 export type { HttpScript, ScriptedHttpResponse } from "./src/http";
+export { Mention, Profile, Tweet } from "./src/models";
 export type {
   GetProfilesOptions,
   GetTweetsOptions,
-  Profile,
   SearchTweetsOptions,
   TimelinePage,
-  Tweet,
   TweetSearchMode,
 } from "./src/models";
 export { TwitterLists } from "./src/lists";
