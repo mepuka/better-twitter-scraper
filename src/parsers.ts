@@ -288,7 +288,7 @@ const parseTweet = (
     ...(html ? { html } : {}),
     ...(legacy.bookmark_count !== undefined ? { bookmarkCount: legacy.bookmark_count } : {}),
     ...(isEdited ? { isEdited } : {}),
-    isSelfThread: false,
+    ...(content.tweetDisplayType === "SelfThread" ? { isSelfThread: true } : {}),
     ...(entryId.startsWith("pinned-tweet-") ? { isPinned: true } : {}),
     isQuoted: legacy.quoted_status_id_str !== undefined,
     isReply: legacy.in_reply_to_status_id_str !== undefined,

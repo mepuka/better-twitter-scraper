@@ -18,6 +18,8 @@ import {
   classifyHttpStatusError,
   decodeParsedBody,
 } from "./http-client-utils";
+import { TwitterEndpointDiscovery } from "./endpoint-discovery";
+import { updateQueryIds } from "./endpoints";
 import { TwitterHttpClient } from "./http";
 import {
   logDebugDecision,
@@ -157,7 +159,6 @@ export const createStrategyExecute = (
         if (
           attempt === 0 &&
           request.authRequirement === "guest" &&
-          request.bearerToken === "default" &&
           (error.status === 401 || error.status === 403)
         ) {
           return Effect.gen(function* () {
@@ -238,6 +239,16 @@ export class ScraperStrategy extends ServiceMap.Service<
         const http = yield* TwitterHttpClient;
         const transport = yield* TransportMetadata;
         const rateLimiter = yield* RateLimiter;
+
+        const discovery = yield* Effect.serviceOption(TwitterEndpointDiscovery);
+        if (Option.isSome(discovery)) {
+          const discovered = yield* discovery.value.discoverQueryIds().pipe(
+            Effect.orElseSucceed(() => new Map<string, string>()),
+          );
+          if (discovered.size > 0) {
+            updateQueryIds(discovered);
+          }
+        }
 
         return {
           execute: createStrategyExecute(
