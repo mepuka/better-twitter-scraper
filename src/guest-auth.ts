@@ -152,10 +152,24 @@ function createGuestAuthContextLayer() {
             request.bearerToken === "default" &&
             request.family !== "activation"
           ) {
+            // Guest token required for default bearer — fail if unavailable
             return {
               ...headers,
               "x-guest-token": yield* guestAuth.currentToken(),
             } as const;
+          }
+
+          if (
+            request.authRequirement === "guest" &&
+            request.bearerToken === "secondary"
+          ) {
+            // Guest token optional for secondary bearer — best-effort
+            const token = yield* guestAuth.currentToken().pipe(
+              Effect.option,
+            );
+            if (Option.isSome(token)) {
+              return { ...headers, "x-guest-token": token.value } as const;
+            }
           }
 
           return headers;

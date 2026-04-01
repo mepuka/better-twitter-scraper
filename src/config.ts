@@ -29,6 +29,9 @@ export interface TwitterConfigShape {
     readonly defaultLimit: number;
     readonly maxPageSize: number;
   };
+  readonly strategy: {
+    readonly retryLimit: number;
+  };
 }
 
 const makeConfig = (
@@ -38,6 +41,7 @@ const makeConfig = (
     readonly proxyUrl?: string;
     readonly requestTimeout: Duration.Duration;
     readonly search: Partial<TwitterConfigShape["search"]>;
+    readonly strategy: Partial<TwitterConfigShape["strategy"]>;
     readonly timeline: Partial<TwitterConfigShape["timeline"]>;
     readonly urls: Partial<TwitterConfigShape["urls"]>;
     readonly userAgent: string;
@@ -67,6 +71,9 @@ const makeConfig = (
   search: {
     defaultLimit: overrides.search?.defaultLimit ?? 20,
     maxPageSize: overrides.search?.maxPageSize ?? 50,
+  },
+  strategy: {
+    retryLimit: overrides.strategy?.retryLimit ?? 1,
   },
 });
 
@@ -109,6 +116,9 @@ export class TwitterConfig extends ServiceMap.Service<
         const userAgent = yield* Config.string("TWITTER_USER_AGENT").pipe(
           Config.withDefault(CHROME_USER_AGENT),
         );
+        const strategyRetryLimit = yield* Config.number(
+          "TWITTER_STRATEGY_RETRY_LIMIT",
+        ).pipe(Config.withDefault(1));
         const proxyUrl = yield* Config.option(Config.string("TWITTER_PROXY_URL"));
 
         return makeConfig({
@@ -132,6 +142,9 @@ export class TwitterConfig extends ServiceMap.Service<
             defaultLimit: searchDefaultLimit,
             maxPageSize: searchMaxPageSize,
           },
+          strategy: {
+            retryLimit: strategyRetryLimit,
+          },
         });
       }),
     );
@@ -144,6 +157,7 @@ export class TwitterConfig extends ServiceMap.Service<
       readonly proxyUrl?: string;
       readonly requestTimeout: Duration.Duration;
       readonly search: Partial<TwitterConfigShape["search"]>;
+      readonly strategy: Partial<TwitterConfigShape["strategy"]>;
       readonly timeline: Partial<TwitterConfigShape["timeline"]>;
       readonly urls: Partial<TwitterConfigShape["urls"]>;
       readonly userAgent: string;

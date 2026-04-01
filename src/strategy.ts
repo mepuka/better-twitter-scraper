@@ -2,6 +2,7 @@ import { Effect, Layer, Option, ServiceMap } from "effect";
 
 import type * as Cookies from "effect/unstable/http/Cookies";
 
+import { TwitterConfig } from "./config";
 import { CookieManager } from "./cookies";
 import {
   AuthenticationError,
@@ -95,6 +96,7 @@ export const createStrategyExecute = (
   http: StrategyTransport,
   rateLimiter: StrategyRateLimiter,
   transport: TransportName,
+  retryLimit = 1,
 ) => {
   const resolveRequestAuth = (
     request: ApiRequest<unknown>,
@@ -157,7 +159,7 @@ export const createStrategyExecute = (
     executeOnce(request).pipe(
       Effect.catchTag("HttpStatusError", (error) => {
         if (
-          attempt === 0 &&
+          attempt < retryLimit &&
           request.authRequirement === "guest" &&
           (error.status === 401 || error.status === 403)
         ) {
@@ -177,7 +179,7 @@ export const createStrategyExecute = (
         if (classified._tag === "RateLimitError") {
           return rateLimiter.noteRateLimit(classified).pipe(
             Effect.tap(() =>
-              attempt === 0
+              attempt < retryLimit
                 ? logDebugDecision("429 retry scheduled", {
                     status: classified.status,
                     ...(classified.reset !== undefined
@@ -187,7 +189,7 @@ export const createStrategyExecute = (
                 : Effect.void,
             ),
             Effect.flatMap(() =>
-              attempt === 0
+              attempt < retryLimit
                 ? executeWithRetry(request, attempt + 1)
                 : Effect.fail(classified),
             ),
@@ -233,6 +235,7 @@ export class ScraperStrategy extends ServiceMap.Service<
     return Layer.effect(
       ScraperStrategy,
       Effect.gen(function* () {
+        const config = yield* TwitterConfig;
         const guest = yield* Effect.serviceOption(GuestRequestAuth);
         const user = yield* Effect.serviceOption(UserRequestAuth);
         const cookies = yield* CookieManager;
@@ -260,6 +263,7 @@ export class ScraperStrategy extends ServiceMap.Service<
             http,
             rateLimiter,
             transport.name,
+            config.strategy.retryLimit,
           ),
         };
       }),
