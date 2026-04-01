@@ -1,24 +1,18 @@
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer } from "effect";
 
 import {
   CookieManager,
-  GuestAuth,
   ScraperStrategy,
   TwitterConfig,
   TwitterHttpClient,
-  TwitterPublic,
-  TwitterRelationships,
+  TwitterTrends,
   UserAuth,
 } from "../index";
 import { loadSerializedCookies } from "../src/live-auth-cookies";
 import { ObservabilityCapture } from "../src/observability-capture";
 
-const liveFollowersLayer = Layer.mergeAll(
-  TwitterPublic.layer,
-  TwitterRelationships.layer,
-).pipe(
+const liveLayer = TwitterTrends.layer.pipe(
   Layer.provideMerge(ScraperStrategy.standardLayer),
-  Layer.provideMerge(GuestAuth.liveLayer),
   Layer.provideMerge(UserAuth.liveLayer),
   Layer.provideMerge(CookieManager.liveLayer),
   Layer.provideMerge(TwitterHttpClient.cycleTlsLayer),
@@ -42,8 +36,7 @@ const main = async () => {
     Effect.gen(function* () {
       const auth = yield* UserAuth;
       const capture = yield* ObservabilityCapture;
-      const publicApi = yield* TwitterPublic;
-      const relationships = yield* TwitterRelationships;
+      const trends = yield* TwitterTrends;
 
       yield* auth.restoreCookies(cookies);
 
@@ -51,22 +44,10 @@ const main = async () => {
         throw new Error("Restored cookies did not produce a signed-in session.");
       }
 
-      const profile = yield* publicApi.getProfile("nomadic_ua");
-      if (!profile.userId) {
-        throw new Error("Resolved profile did not include a userId.");
-      }
+      const items = yield* trends.getTrends();
 
-      const loadFollowers = () =>
-        Stream.runCollect(relationships.getFollowers(profile.userId!, { limit: 1 }));
-
-      const followers = yield* loadFollowers().pipe(
-        Effect.catchTag("BotDetectionError", () =>
-          Effect.sleep("1 second").pipe(Effect.andThen(loadFollowers())),
-        ),
-      );
-
-      if (followers.length === 0) {
-        throw new Error("Followers lookup returned no profiles.");
+      if (items.length === 0) {
+        throw new Error("Trends lookup returned no entries.");
       }
 
       const spans = yield* capture.spans;
@@ -81,16 +62,10 @@ const main = async () => {
         observability: {
           strategyCalls,
         },
-        followers: followers.map((item) => item.username),
-        profile: {
-          userId: profile.userId,
-          username: profile.username,
-        },
+        trends: items,
       };
     }).pipe(
-      Effect.provide(
-        Layer.mergeAll(liveFollowersLayer, ObservabilityCapture.layer()),
-      ),
+      Effect.provide(Layer.mergeAll(liveLayer, ObservabilityCapture.layer())),
     ),
   );
 

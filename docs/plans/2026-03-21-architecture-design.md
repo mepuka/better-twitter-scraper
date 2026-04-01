@@ -658,6 +658,30 @@ Status:
 - Deterministic builder/parser tests cover focal tweet presence, reply/quote/retweet/thread relations, deduplication, parser drift, and focal-tweet absence.
 - Live proof exists for an authenticated thread canary and records `TweetDetail` request context in the captured strategy spans.
 
+### Slice 4C — Signed-In Search / Timeline / Trends Expansion
+
+Build:
+
+- tweet search on `TwitterSearch`
+- signed-in `tweets-and-replies` on `TwitterTweets`
+- signed-in liked tweets on `TwitterTweets`
+- signed-in trends on `TwitterTrends`
+- shared parser reuse for SearchTimeline tweet results and signed-in V2 tweet timelines
+
+This slice proves:
+
+- the current authenticated strategy path can widen beyond profile search, relationships, and tweet detail without reopening the auth / retry / observability design
+- signed-in search and signed-in timeline reads can share the same summary `Tweet` model while `TweetDetailDocument` stays the richer single-post shape
+- the rest-family trends endpoint can flow through the same transport, limiter, and observability path as the GraphQL endpoints
+
+Status:
+
+- `TwitterSearch.searchTweets(query, options)` is implemented for `top`, `latest`, `photos`, and `videos`.
+- `TwitterTweets.getTweetsAndReplies(userId, options)` and `TwitterTweets.getLikedTweets(userId, options)` are implemented as signed-in timeline streams.
+- `TwitterTrends.getTrends()` is implemented and returns `readonly string[]`.
+- Deterministic request, parser, auth rejection, 429 retry, and mixed-runtime tests are in place for the new buckets: `searchTweets`, `tweetsAndReplies`, `likedTweets`, and `trends`.
+- Live proof exists for tweet search, tweets-and-replies, and trends, with liked-tweets live proof enabled when `TWITTER_LIKES_CANARY_USER_ID` is provided.
+
 ### Slice 5 — Password Login Automation and Direct Messages
 
 Build:

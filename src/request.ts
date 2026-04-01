@@ -16,9 +16,13 @@ export type EndpointId =
   | "GuestActivate"
   | "Followers"
   | "Following"
+  | "Likes"
   | "SearchProfiles"
+  | "SearchTweets"
   | "TweetDetail"
+  | "Trends"
   | "UserByScreenName"
+  | "UserTweetsAndReplies"
   | "UserTweets"
   | (string & {});
 export type RateLimitBucket =
@@ -26,9 +30,13 @@ export type RateLimitBucket =
   | "generic"
   | "guestActivation"
   | "following"
+  | "likedTweets"
   | "profileLookup"
   | "searchProfiles"
+  | "searchTweets"
+  | "trends"
   | "tweetDetail"
+  | "tweetsAndReplies"
   | "userTweets"
   | (string & {});
 

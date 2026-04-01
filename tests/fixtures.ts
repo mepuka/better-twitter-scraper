@@ -308,6 +308,362 @@ export const searchProfilesPageTwoFixture = {
   },
 } as const;
 
+const searchTweetEntry = (tweet: Parameters<typeof tweetResult>[0]) => ({
+  entryId: `tweet-${tweet.id}`,
+  content: {
+    itemContent: {
+      tweetDisplayType: "Tweet",
+      tweet_results: {
+        result: tweetResult(tweet),
+      },
+    },
+  },
+});
+
+export const searchTweetsPageOneFixture = {
+  data: {
+    search_by_raw_query: {
+      search_timeline: {
+        timeline: {
+          instructions: [
+            {
+              type: "TimelineAddEntries",
+              entries: [
+                searchTweetEntry({
+                  id: "search-tweet-1",
+                  text: "Top search tweet",
+                  username: "tweet_searcher",
+                  name: "Tweet Searcher",
+                  userId: "5001",
+                  createdAt: "Mon Jan 18 12:00:00 +0000 2010",
+                  hashtags: ["search"],
+                  urls: ["https://example.com/search-1"],
+                  views: "111",
+                }),
+                searchTweetEntry({
+                  id: "search-tweet-2",
+                  text: "Second search tweet",
+                  username: "tweet_searcher_two",
+                  name: "Tweet Searcher Two",
+                  userId: "5002",
+                  createdAt: "Mon Jan 18 12:05:00 +0000 2010",
+                  mentions: [
+                    {
+                      id: "99",
+                      username: "helper",
+                      name: "Helpful Person",
+                    },
+                  ],
+                }),
+                {
+                  entryId: "cursor-bottom-search-tweets-1",
+                  content: {
+                    cursorType: "Bottom",
+                    value: "search-tweets-cursor-1",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  },
+} as const;
+
+export const searchTweetsPageTwoFixture = {
+  data: {
+    search_by_raw_query: {
+      search_timeline: {
+        timeline: {
+          instructions: [
+            {
+              type: "TimelineAddEntries",
+              entries: [
+                searchTweetEntry({
+                  id: "search-tweet-3",
+                  text: "Third search tweet",
+                  username: "tweet_searcher_three",
+                  name: "Tweet Searcher Three",
+                  userId: "5003",
+                  createdAt: "Mon Jan 18 12:10:00 +0000 2010",
+                }),
+              ],
+            },
+          ],
+        },
+      },
+    },
+  },
+} as const;
+
+export const tweetsAndRepliesPageOneFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                entries: [
+                  tweetEntry({
+                    id: "reply-tweet-1",
+                    text: "@friend first reply",
+                    username: "nomadic_ua",
+                    name: "Nomadic",
+                    userId: "106037940",
+                    createdAt: "Mon Jan 18 13:00:00 +0000 2010",
+                    mentions: [
+                      {
+                        id: "42",
+                        username: "friend",
+                        name: "Friendly User",
+                      },
+                    ],
+                  }),
+                  tweetEntry({
+                    id: "reply-tweet-2",
+                    text: "Second reply in timeline",
+                    username: "nomadic_ua",
+                    name: "Nomadic",
+                    userId: "106037940",
+                    createdAt: "Mon Jan 18 13:05:00 +0000 2010",
+                  }),
+                  {
+                    entryId: "cursor-bottom-replies-1",
+                    content: {
+                      cursorType: "Bottom",
+                      value: "tweets-and-replies-cursor-1",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const tweetsAndRepliesPageTwoFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                entries: [
+                  tweetEntry({
+                    id: "reply-tweet-3",
+                    text: "Third reply in timeline",
+                    username: "nomadic_ua",
+                    name: "Nomadic",
+                    userId: "106037940",
+                    createdAt: "Mon Jan 18 13:10:00 +0000 2010",
+                  }),
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const tweetsAndRepliesDuplicateCursorFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                entries: [
+                  tweetEntry({
+                    id: "reply-tweet-4",
+                    text: "Duplicate cursor reply",
+                    username: "nomadic_ua",
+                    name: "Nomadic",
+                    userId: "106037940",
+                    createdAt: "Mon Jan 18 13:15:00 +0000 2010",
+                  }),
+                  {
+                    entryId: "cursor-bottom-replies-duplicate",
+                    content: {
+                      cursorType: "Bottom",
+                      value: "tweets-and-replies-cursor-1",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const likedTweetsPageOneFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                entries: [
+                  tweetEntry({
+                    id: "liked-tweet-1",
+                    text: "First liked tweet",
+                    username: "liked_author",
+                    name: "Liked Author",
+                    userId: "6001",
+                    createdAt: "Mon Jan 18 14:00:00 +0000 2010",
+                    views: "71",
+                  }),
+                  tweetEntry({
+                    id: "liked-tweet-2",
+                    text: "Second liked tweet",
+                    username: "liked_author_two",
+                    name: "Liked Author Two",
+                    userId: "6002",
+                    createdAt: "Mon Jan 18 14:05:00 +0000 2010",
+                  }),
+                  {
+                    entryId: "cursor-bottom-liked-1",
+                    content: {
+                      cursorType: "Bottom",
+                      value: "liked-cursor-1",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const likedTweetsPageTwoFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                entries: [
+                  tweetEntry({
+                    id: "liked-tweet-3",
+                    text: "Third liked tweet",
+                    username: "liked_author_three",
+                    name: "Liked Author Three",
+                    userId: "6003",
+                    createdAt: "Mon Jan 18 14:10:00 +0000 2010",
+                  }),
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const likedTweetsDuplicateCursorFixture = {
+  data: {
+    user: {
+      result: {
+        timeline: {
+          timeline: {
+            instructions: [
+              {
+                entries: [
+                  tweetEntry({
+                    id: "liked-tweet-4",
+                    text: "Duplicate cursor liked tweet",
+                    username: "liked_author_four",
+                    name: "Liked Author Four",
+                    userId: "6004",
+                    createdAt: "Mon Jan 18 14:15:00 +0000 2010",
+                  }),
+                  {
+                    entryId: "cursor-bottom-liked-duplicate",
+                    content: {
+                      cursorType: "Bottom",
+                      value: "liked-cursor-1",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const trendsFixture = {
+  timeline: {
+    instructions: [
+      {},
+      {
+        addEntries: {
+          entries: [
+            {},
+            {
+              content: {
+                timelineModule: {
+                  items: [
+                    {
+                      item: {
+                        clientEventInfo: {
+                          details: {
+                            guideDetails: {
+                              transparentGuideDetails: {
+                                trendMetadata: {
+                                  trendName: "Effect",
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    {
+                      item: {
+                        clientEventInfo: {
+                          details: {
+                            guideDetails: {
+                              transparentGuideDetails: {
+                                trendMetadata: {
+                                  trendName: "TwitterScraper",
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      },
+    ],
+  },
+} as const;
+
 export const followersPageOneFixture = {
   data: {
     user: {

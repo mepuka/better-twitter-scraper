@@ -69,3 +69,10 @@ export interface GetTweetsOptions {
 export interface GetProfilesOptions {
   readonly limit?: number;
 }
+
+export type TweetSearchMode = "top" | "latest" | "photos" | "videos";
+
+export interface SearchTweetsOptions {
+  readonly limit?: number;
+  readonly mode?: TweetSearchMode;
+}

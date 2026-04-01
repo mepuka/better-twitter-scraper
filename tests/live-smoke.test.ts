@@ -13,6 +13,7 @@ import { loadSerializedCookies } from "../src/live-auth-cookies";
 
 const runLive = process.env.RUN_LIVE_TWITTER_SMOKE === "1";
 const runAuthLive = process.env.RUN_LIVE_TWITTER_AUTH_SMOKE === "1";
+const likesCanaryUserId = process.env.TWITTER_LIKES_CANARY_USER_ID;
 const { cookies: serializedCookies, error: serializedCookiesError } =
   loadSerializedCookies();
 
@@ -296,11 +297,185 @@ describe("Live authenticated smoke", () => {
         ]),
       );
     }, 30_000);
+
+    it("searches tweets with restored cookies", async () => {
+      const result = spawnSync("bun", ["scripts/live-search-tweets-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly tweets: ReadonlyArray<{
+          readonly id?: string;
+        }>;
+      };
+
+      expect(payload.tweets.length).toBeGreaterThan(0);
+      expect(payload.tweets[0]?.id).toBeTruthy();
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "SearchTweets",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
+
+    it("loads tweets-and-replies with restored cookies", async () => {
+      const result = spawnSync("bun", ["scripts/live-tweets-and-replies-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly tweets: ReadonlyArray<{
+          readonly id?: string;
+        }>;
+      };
+
+      expect(payload.tweets.length).toBeGreaterThan(0);
+      expect(payload.tweets[0]?.id).toBeTruthy();
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "UserTweetsAndReplies",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
+
+    it("loads trends with restored cookies", async () => {
+      const result = spawnSync("bun", ["scripts/live-trends-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly trends: readonly string[];
+      };
+
+      expect(payload.trends.length).toBeGreaterThan(0);
+      expect(payload.trends[0]).toBeTruthy();
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "Trends",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
+
+    if (likesCanaryUserId) {
+      it("loads liked tweets when a likes canary user id is configured", async () => {
+        const result = spawnSync("bun", ["scripts/live-liked-tweets-smoke.ts"], {
+          cwd: process.cwd(),
+          env: process.env,
+          encoding: "utf8",
+        });
+
+        const stdout = result.stdout.trim();
+        const stderr = result.stderr.trim();
+
+        expect({
+          exitCode: result.status,
+          stderr,
+        }).toEqual({
+          exitCode: 0,
+          stderr: "",
+        });
+
+        const payload = JSON.parse(stdout) as {
+          readonly observability: {
+            readonly strategyCalls: ReadonlyArray<{
+              readonly authMode: string;
+              readonly endpointId: string;
+            }>;
+          };
+          readonly tweets: ReadonlyArray<{
+            readonly id?: string;
+          }>;
+        };
+
+        expect(payload.tweets.length).toBeGreaterThan(0);
+        expect(payload.tweets[0]?.id).toBeTruthy();
+        expect(payload.observability.strategyCalls).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              endpointId: "Likes",
+              authMode: "user",
+            }),
+          ]),
+        );
+      }, 30_000);
+    } else {
+      it.skip("loads liked tweets when a likes canary user id is configured", () => {});
+    }
   } else {
     it.skip("restores a signed-in session from cookies", () => {});
     it.skip("searches profiles with restored cookies", () => {});
     it.skip("hosts guest and authenticated services together in one runtime", () => {});
     it.skip("loads followers through the mixed guest and authenticated runtime", () => {});
     it.skip("loads authenticated tweet detail for a thread canary", () => {});
+    it.skip("searches tweets with restored cookies", () => {});
+    it.skip("loads tweets-and-replies with restored cookies", () => {});
+    it.skip("loads trends with restored cookies", () => {});
+    it.skip("loads liked tweets when a likes canary user id is configured", () => {});
   }
 });

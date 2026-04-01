@@ -3,7 +3,13 @@ import { Effect, Layer, Option, ServiceMap, Stream } from "effect";
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
 import { AuthenticationError } from "./errors";
-import type { GetProfilesOptions, Profile, TimelinePage } from "./models";
+import type {
+  GetProfilesOptions,
+  Profile,
+  SearchTweetsOptions,
+  TimelinePage,
+  Tweet,
+} from "./models";
 import { ScraperStrategy, type StrategyError } from "./strategy";
 import { UserAuth } from "./user-auth";
 
@@ -23,6 +29,10 @@ export class TwitterSearch extends ServiceMap.Service<
       query: string,
       options?: GetProfilesOptions,
     ) => Stream.Stream<Profile, SearchError>;
+    readonly searchTweets: (
+      query: string,
+      options?: SearchTweetsOptions,
+    ) => Stream.Stream<Tweet, SearchError>;
   }
 >()("@better-twitter-scraper/TwitterSearch") {
   static readonly layer = Layer.effect(
@@ -45,9 +55,30 @@ export class TwitterSearch extends ServiceMap.Service<
           ),
       );
 
-      const searchProfiles = (
+      const fetchTweetsPage = Effect.fn("TwitterSearch.fetchTweetsPage")(
+        (query: string, count: number, mode: SearchTweetsOptions["mode"], cursor?: string) =>
+          (strategy.execute(
+            endpointRegistry.searchTweets(
+              query,
+              Math.min(count, config.search.maxPageSize),
+              mode ?? "top",
+              cursor,
+            ),
+          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>).pipe(
+            Effect.withSpan("TwitterSearch.fetchTweetsPage"),
+          ),
+      );
+
+      const streamSearch = <T>(
         query: string,
-        options: GetProfilesOptions = {},
+        options: {
+          readonly limit?: number;
+        },
+        fetchPage: (
+          query: string,
+          count: number,
+          cursor?: string,
+        ) => Effect.Effect<TimelinePage<T>, StrategyError>,
       ) =>
         Stream.unwrap(
           Effect.gen(function* () {
@@ -64,7 +95,7 @@ export class TwitterSearch extends ServiceMap.Service<
               seenCursors: new Set<string>(),
             };
 
-            return Stream.paginate<SearchState, Profile, SearchError>(
+            return Stream.paginate<SearchState, T, SearchError>(
               initialState,
               (state) => {
                 if (state.remaining <= 0) {
@@ -75,7 +106,7 @@ export class TwitterSearch extends ServiceMap.Service<
                 }
 
                 return Effect.gen(function* () {
-                  const page = yield* fetchProfilesPage(
+                  const page = yield* fetchPage(
                     state.query,
                     state.remaining,
                     state.cursor,
@@ -109,7 +140,23 @@ export class TwitterSearch extends ServiceMap.Service<
           }),
         );
 
-      return { searchProfiles };
+      const searchProfiles = (
+        query: string,
+        options: GetProfilesOptions = {},
+      ) =>
+        streamSearch(query, options, (searchQuery, count, cursor) =>
+          fetchProfilesPage(searchQuery, count, cursor),
+        );
+
+      const searchTweets = (
+        query: string,
+        options: SearchTweetsOptions = {},
+      ) =>
+        streamSearch(query, options, (searchQuery, count, cursor) =>
+          fetchTweetsPage(searchQuery, count, options.mode, cursor),
+        );
+
+      return { searchProfiles, searchTweets };
     }),
   );
 }

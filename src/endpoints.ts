@@ -1,11 +1,15 @@
-import type { Profile, TimelinePage, Tweet } from "./models";
+import type { Profile, TimelinePage, Tweet, TweetSearchMode } from "./models";
 import {
   parseFollowersPageResponse,
   parseFollowingPageResponse,
   parseProfileResponse,
   parseSearchProfilesResponse,
+  parseSearchTweetsResponse,
   parseTweetDetailResponse,
+  parseTrendsResponse,
+  parseTweetsAndRepliesPageResponse,
   parseTimelinePageResponse,
+  parseLikedTweetsPageResponse,
 } from "./parsers";
 import type { ApiRequest } from "./request";
 import type { TweetDetailDocument } from "./tweet-detail-model";
@@ -132,7 +136,7 @@ const endpointTemplates = {
       withArticlePlainText: false,
     },
   },
-  searchProfiles: {
+  searchTimeline: {
     url: "https://api.x.com/graphql/ML-n2SfAxx5S_9QMqNejbg/SearchTimeline",
     variables: {
       rawQuery: "twitter",
@@ -142,6 +146,35 @@ const endpointTemplates = {
       withGrokTranslatedBio: false,
     },
     features: authenticatedProfilesTimelineFeatures,
+  },
+  userTweetsAndReplies: {
+    url: "https://api.x.com/graphql/2NDLUdBmT_IB5uGwZ3tHRg/UserTweetsAndReplies",
+    variables: {
+      userId: "1806359170830172162",
+      count: 20,
+      includePromotedContent: true,
+      withCommunity: true,
+      withVoice: true,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+    fieldToggles: {
+      withArticlePlainText: false,
+    },
+  },
+  likes: {
+    url: "https://api.x.com/graphql/Pcw-j9lrSeDMmkgnIejJiQ/Likes",
+    variables: {
+      userId: "2244196397",
+      count: 20,
+      includePromotedContent: false,
+      withClientEventToken: false,
+      withBirdwatchNotes: false,
+      withVoice: true,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+    fieldToggles: {
+      withArticlePlainText: false,
+    },
   },
   followers: {
     url: "https://api.x.com/graphql/P7m4Qr-rJEB8KUluOenU6A/Followers",
@@ -205,6 +238,64 @@ const normalizeForJson = (value: unknown): unknown => {
 const stableJson = (value: unknown) => JSON.stringify(normalizeForJson(value));
 
 const relationshipCount = (count: number) => Math.min(count, 50);
+const searchCount = (count: number) => Math.min(count, 50);
+const tweetsAndRepliesCount = (count: number) => Math.min(count, 40);
+const likedTweetsCount = (count: number) => Math.min(count, 200);
+
+const buildTrendsUrl = () => {
+  const params = new URLSearchParams();
+
+  params.set("include_profile_interstitial_type", "1");
+  params.set("include_blocking", "1");
+  params.set("include_blocked_by", "1");
+  params.set("include_followed_by", "1");
+  params.set("include_want_retweets", "1");
+  params.set("include_mute_edge", "1");
+  params.set("include_can_dm", "1");
+  params.set("include_can_media_tag", "1");
+  params.set("include_ext_has_nft_avatar", "1");
+  params.set("include_ext_is_blue_verified", "1");
+  params.set("include_ext_verified_type", "1");
+  params.set("skip_status", "1");
+  params.set("cards_platform", "Web-12");
+  params.set("include_cards", "1");
+  params.set("include_ext_alt_text", "true");
+  params.set("include_ext_limited_action_results", "false");
+  params.set("include_quote_count", "true");
+  params.set("include_reply_count", "1");
+  params.set("tweet_mode", "extended");
+  params.set("include_ext_collab_control", "true");
+  params.set("include_ext_views", "true");
+  params.set("include_entities", "true");
+  params.set("include_user_entities", "true");
+  params.set("include_ext_media_color", "true");
+  params.set("include_ext_media_availability", "true");
+  params.set("include_ext_sensitive_media_warning", "true");
+  params.set("include_ext_trusted_friends_metadata", "true");
+  params.set("send_error_codes", "true");
+  params.set("simple_quoted_tweet", "true");
+  params.set("include_tweet_replies", "false");
+  params.set("count", "20");
+  params.set("candidate_source", "trends");
+  params.set("include_page_configuration", "false");
+  params.set("entity_tokens", "false");
+
+  return `https://api.x.com/2/guide.json?${params.toString()}`;
+};
+
+const searchProductForMode = (mode: TweetSearchMode) => {
+  switch (mode) {
+    case "latest":
+      return "Latest";
+    case "photos":
+      return "Photos";
+    case "videos":
+      return "Videos";
+    case "top":
+    default:
+      return "Top";
+  }
+};
 
 const buildUrl = (
   template: EndpointTemplate,
@@ -312,17 +403,44 @@ export const endpointRegistry = {
       bearerToken: "secondary",
       rateLimitBucket: "searchProfiles",
       method: "GET",
-      url: buildUrl(endpointTemplates.searchProfiles, {
+      url: buildUrl(endpointTemplates.searchTimeline, {
         variables: {
-          ...endpointTemplates.searchProfiles.variables,
+          ...endpointTemplates.searchTimeline.variables,
           rawQuery: query,
-          count,
+          count: searchCount(count),
           product: "People",
           cursor,
         },
       }),
       responseKind: "json",
       decode: parseSearchProfilesResponse,
+    };
+  },
+
+  searchTweets(
+    query: string,
+    count: number,
+    mode: TweetSearchMode,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Tweet>> {
+    return {
+      endpointId: "SearchTweets",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "searchTweets",
+      method: "GET",
+      url: buildUrl(endpointTemplates.searchTimeline, {
+        variables: {
+          ...endpointTemplates.searchTimeline.variables,
+          rawQuery: query,
+          count: searchCount(count),
+          product: searchProductForMode(mode),
+          cursor,
+        },
+      }),
+      responseKind: "json",
+      decode: parseSearchTweetsResponse,
     };
   },
 
@@ -376,6 +494,59 @@ export const endpointRegistry = {
     };
   },
 
+  userTweetsAndReplies(
+    userId: string,
+    count: number,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Tweet>> {
+    return {
+      endpointId: "UserTweetsAndReplies",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "tweetsAndReplies",
+      method: "GET",
+      url: buildUrl(endpointTemplates.userTweetsAndReplies, {
+        variables: {
+          ...endpointTemplates.userTweetsAndReplies.variables,
+          userId,
+          count: tweetsAndRepliesCount(count),
+          includePromotedContent: false,
+          cursor,
+        },
+        fieldToggles: endpointTemplates.userTweetsAndReplies.fieldToggles,
+      }),
+      responseKind: "json",
+      decode: parseTweetsAndRepliesPageResponse,
+    };
+  },
+
+  likedTweets(
+    userId: string,
+    count: number,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Tweet>> {
+    return {
+      endpointId: "Likes",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "likedTweets",
+      method: "GET",
+      url: buildUrl(endpointTemplates.likes, {
+        variables: {
+          ...endpointTemplates.likes.variables,
+          userId,
+          count: likedTweetsCount(count),
+          cursor,
+        },
+        fieldToggles: endpointTemplates.likes.fieldToggles,
+      }),
+      responseKind: "json",
+      decode: parseLikedTweetsPageResponse,
+    };
+  },
+
   tweetDetail(id: string): ApiRequest<TweetDetailDocument> {
     return {
       endpointId: "TweetDetail",
@@ -392,6 +563,20 @@ export const endpointRegistry = {
       }),
       responseKind: "json",
       decode: (body) => parseTweetDetailResponse(body, id),
+    };
+  },
+
+  trends(): ApiRequest<readonly string[]> {
+    return {
+      endpointId: "Trends",
+      family: "rest",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "trends",
+      method: "GET",
+      url: buildTrendsUrl(),
+      responseKind: "json",
+      decode: parseTrendsResponse,
     };
   },
 } as const;

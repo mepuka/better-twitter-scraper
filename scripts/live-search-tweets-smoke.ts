@@ -2,23 +2,17 @@ import { Effect, Layer, Stream } from "effect";
 
 import {
   CookieManager,
-  GuestAuth,
   ScraperStrategy,
   TwitterConfig,
   TwitterHttpClient,
-  TwitterPublic,
-  TwitterRelationships,
+  TwitterSearch,
   UserAuth,
 } from "../index";
 import { loadSerializedCookies } from "../src/live-auth-cookies";
 import { ObservabilityCapture } from "../src/observability-capture";
 
-const liveFollowersLayer = Layer.mergeAll(
-  TwitterPublic.layer,
-  TwitterRelationships.layer,
-).pipe(
+const liveLayer = TwitterSearch.layer.pipe(
   Layer.provideMerge(ScraperStrategy.standardLayer),
-  Layer.provideMerge(GuestAuth.liveLayer),
   Layer.provideMerge(UserAuth.liveLayer),
   Layer.provideMerge(CookieManager.liveLayer),
   Layer.provideMerge(TwitterHttpClient.cycleTlsLayer),
@@ -42,8 +36,7 @@ const main = async () => {
     Effect.gen(function* () {
       const auth = yield* UserAuth;
       const capture = yield* ObservabilityCapture;
-      const publicApi = yield* TwitterPublic;
-      const relationships = yield* TwitterRelationships;
+      const search = yield* TwitterSearch;
 
       yield* auth.restoreCookies(cookies);
 
@@ -51,22 +44,12 @@ const main = async () => {
         throw new Error("Restored cookies did not produce a signed-in session.");
       }
 
-      const profile = yield* publicApi.getProfile("nomadic_ua");
-      if (!profile.userId) {
-        throw new Error("Resolved profile did not include a userId.");
-      }
-
-      const loadFollowers = () =>
-        Stream.runCollect(relationships.getFollowers(profile.userId!, { limit: 1 }));
-
-      const followers = yield* loadFollowers().pipe(
-        Effect.catchTag("BotDetectionError", () =>
-          Effect.sleep("1 second").pipe(Effect.andThen(loadFollowers())),
-        ),
+      const tweets = yield* Stream.runCollect(
+        search.searchTweets("Twitter", { limit: 2, mode: "top" }),
       );
 
-      if (followers.length === 0) {
-        throw new Error("Followers lookup returned no profiles.");
+      if (tweets.length === 0) {
+        throw new Error("Tweet search returned no tweets.");
       }
 
       const spans = yield* capture.spans;
@@ -81,16 +64,13 @@ const main = async () => {
         observability: {
           strategyCalls,
         },
-        followers: followers.map((item) => item.username),
-        profile: {
-          userId: profile.userId,
-          username: profile.username,
-        },
+        tweets: tweets.map((tweet) => ({
+          id: tweet.id,
+          username: tweet.username,
+        })),
       };
     }).pipe(
-      Effect.provide(
-        Layer.mergeAll(liveFollowersLayer, ObservabilityCapture.layer()),
-      ),
+      Effect.provide(Layer.mergeAll(liveLayer, ObservabilityCapture.layer())),
     ),
   );
 

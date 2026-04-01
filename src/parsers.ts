@@ -164,6 +164,10 @@ interface SearchUserResultRaw {
 }
 
 interface SearchEntryItemContentRaw {
+  readonly tweetDisplayType?: string;
+  readonly tweet_results?: {
+    readonly result?: TimelineResultRaw;
+  };
   readonly userDisplayType?: string;
   readonly user_results?: {
     readonly result?: SearchUserResultRaw;
@@ -208,6 +212,36 @@ interface RelationshipTimelineResponse {
         };
       };
     };
+  };
+}
+
+interface TrendsGuideResponse {
+  readonly timeline?: {
+    readonly instructions?: ReadonlyArray<{
+      readonly addEntries?: {
+        readonly entries?: ReadonlyArray<{
+          readonly content?: {
+            readonly timelineModule?: {
+              readonly items?: ReadonlyArray<{
+                readonly item?: {
+                  readonly clientEventInfo?: {
+                    readonly details?: {
+                      readonly guideDetails?: {
+                        readonly transparentGuideDetails?: {
+                          readonly trendMetadata?: {
+                            readonly trendName?: string;
+                          };
+                        };
+                      };
+                    };
+                  };
+                };
+              }>;
+            };
+          };
+        }>;
+      };
+    }>;
   };
 }
 
@@ -436,11 +470,10 @@ export const parseSearchProfilesResponse = (
   const response = body as SearchTimelineResponse;
   const instructions =
     response.data?.search_by_raw_query?.search_timeline?.timeline?.instructions;
-  return parseProfilesTimelinePage(
-    instructions,
-    "SearchProfiles",
-    "Missing search timeline instructions in Twitter response",
-  );
+  return parseProfilesTimelinePage(instructions, {
+    endpointId: "SearchProfiles",
+    missingReason: "Missing search timeline instructions in Twitter response",
+  });
 };
 
 export const parseFollowersPageResponse = (
@@ -448,11 +481,10 @@ export const parseFollowersPageResponse = (
 ): TimelinePage<Profile> => {
   const response = body as RelationshipTimelineResponse;
   const instructions = response.data?.user?.result?.timeline?.timeline?.instructions;
-  return parseProfilesTimelinePage(
-    instructions,
-    "Followers",
-    "Missing followers timeline instructions in Twitter response",
-  );
+  return parseProfilesTimelinePage(instructions, {
+    endpointId: "Followers",
+    missingReason: "Missing followers timeline instructions in Twitter response",
+  });
 };
 
 export const parseFollowingPageResponse = (
@@ -460,22 +492,47 @@ export const parseFollowingPageResponse = (
 ): TimelinePage<Profile> => {
   const response = body as RelationshipTimelineResponse;
   const instructions = response.data?.user?.result?.timeline?.timeline?.instructions;
-  return parseProfilesTimelinePage(
-    instructions,
-    "Following",
-    "Missing following timeline instructions in Twitter response",
-  );
+  return parseProfilesTimelinePage(instructions, {
+    endpointId: "Following",
+    missingReason: "Missing following timeline instructions in Twitter response",
+  });
+};
+
+const getInstructionEntries = <TEntry>(instruction: {
+  readonly entries?: ReadonlyArray<TEntry>;
+  readonly entry?: TEntry;
+}) => [
+  ...(instruction.entries ?? []),
+  ...(instruction.entry ? [instruction.entry] : []),
+];
+
+const parseSearchProfile = (
+  itemContent: SearchEntryItemContentRaw,
+): Profile | undefined => {
+  if (itemContent.userDisplayType !== "User") {
+    return undefined;
+  }
+
+  const user = itemContent.user_results?.result;
+  return parseUserProfile({
+    legacy: user?.legacy,
+    restId: user?.rest_id,
+    isBlueVerified: user?.is_blue_verified,
+    core: user?.core,
+  });
 };
 
 const parseProfilesTimelinePage = (
   instructions: ReadonlyArray<SearchInstructionRaw> | undefined,
-  endpointId: "Followers" | "Following" | "SearchProfiles",
-  missingReason: string,
+  options: {
+    readonly endpointId: "Followers" | "Following" | "SearchProfiles";
+    readonly missingReason: string;
+  },
 ): TimelinePage<Profile> => {
   if (!instructions) {
     throw new InvalidResponseError({
-      endpointId,
-      reason: missingReason,
+      endpointId: options.endpointId,
+      reason: options.missingReason,
     });
   }
 
@@ -488,14 +545,11 @@ const parseProfilesTimelinePage = (
       instruction.type &&
       instruction.type !== "TimelineAddEntries" &&
       instruction.type !== "TimelineReplaceEntry"
-    ) {
+      ) {
       continue;
     }
 
-    const entries = [
-      ...(instruction.entries ?? []),
-      ...(instruction.entry ? [instruction.entry] : []),
-    ];
+    const entries = getInstructionEntries(instruction);
 
     for (const entry of entries) {
       if (entry.content?.cursorType === "Bottom") {
@@ -508,18 +562,9 @@ const parseProfilesTimelinePage = (
         continue;
       }
 
-      const itemContent = entry.content?.itemContent;
-      if (itemContent?.userDisplayType !== "User") {
-        continue;
-      }
-
-      const user = itemContent.user_results?.result;
-      const profile = parseUserProfile({
-        legacy: user?.legacy,
-        restId: user?.rest_id,
-        isBlueVerified: user?.is_blue_verified,
-        core: user?.core,
-      });
+      const profile = entry.content?.itemContent
+        ? parseSearchProfile(entry.content.itemContent)
+        : undefined;
 
       if (profile) {
         items.push(profile);
@@ -535,14 +580,17 @@ const parseProfilesTimelinePage = (
   } as TimelinePage<Profile>;
 };
 
-export const parseTimelinePageResponse = (body: unknown): TimelinePage<Tweet> => {
-  const response = body as UserTweetsResponse;
-  const instructions =
-    response.data?.user?.result?.timeline?.timeline?.instructions;
+const parseTweetsTimelinePage = (
+  instructions: ReadonlyArray<TimelineInstructionRaw> | undefined,
+  options: {
+    readonly endpointId: "Likes" | "UserTweets" | "UserTweetsAndReplies";
+    readonly missingReason: string;
+  },
+): TimelinePage<Tweet> => {
   if (!instructions) {
     throw new InvalidResponseError({
-      endpointId: "UserTweets",
-      reason: "Missing timeline instructions in Twitter response",
+      endpointId: options.endpointId,
+      reason: options.missingReason,
     });
   }
 
@@ -551,10 +599,7 @@ export const parseTimelinePageResponse = (body: unknown): TimelinePage<Tweet> =>
   const items: Tweet[] = [];
 
   for (const instruction of instructions) {
-    const entries = [
-      ...(instruction.entries ?? []),
-      ...(instruction.entry ? [instruction.entry] : []),
-    ];
+    const entries = getInstructionEntries(instruction);
 
     for (const entry of entries) {
       if (entry.content?.cursorType === "Bottom") {
@@ -602,6 +647,136 @@ export const parseTimelinePageResponse = (body: unknown): TimelinePage<Tweet> =>
     ...(previousCursor ? { previousCursor } : {}),
     status: nextCursor ? "has_more" : "at_end",
   } as TimelinePage<Tweet>;
+};
+
+export const parseTimelinePageResponse = (body: unknown): TimelinePage<Tweet> => {
+  const response = body as UserTweetsResponse;
+  const instructions =
+    response.data?.user?.result?.timeline?.timeline?.instructions;
+
+  return parseTweetsTimelinePage(instructions, {
+    endpointId: "UserTweets",
+    missingReason: "Missing timeline instructions in Twitter response",
+  });
+};
+
+export const parseTweetsAndRepliesPageResponse = (
+  body: unknown,
+): TimelinePage<Tweet> => {
+  const response = body as UserTweetsResponse;
+  const instructions =
+    response.data?.user?.result?.timeline?.timeline?.instructions;
+
+  return parseTweetsTimelinePage(instructions, {
+    endpointId: "UserTweetsAndReplies",
+    missingReason:
+      "Missing tweets-and-replies timeline instructions in Twitter response",
+  });
+};
+
+export const parseLikedTweetsPageResponse = (
+  body: unknown,
+): TimelinePage<Tweet> => {
+  const response = body as UserTweetsResponse;
+  const instructions =
+    response.data?.user?.result?.timeline?.timeline?.instructions;
+
+  return parseTweetsTimelinePage(instructions, {
+    endpointId: "Likes",
+    missingReason: "Missing liked tweets timeline instructions in Twitter response",
+  });
+};
+
+const parseSearchTweetsTimelinePage = (
+  instructions: ReadonlyArray<SearchInstructionRaw> | undefined,
+): TimelinePage<Tweet> => {
+  if (!instructions) {
+    throw new InvalidResponseError({
+      endpointId: "SearchTweets",
+      reason: "Missing search timeline instructions in Twitter response",
+    });
+  }
+
+  let nextCursor: string | undefined;
+  let previousCursor: string | undefined;
+  const items: Tweet[] = [];
+
+  for (const instruction of instructions) {
+    if (
+      instruction.type &&
+      instruction.type !== "TimelineAddEntries" &&
+      instruction.type !== "TimelineReplaceEntry"
+    ) {
+      continue;
+    }
+
+    const entries = getInstructionEntries(instruction);
+
+    for (const entry of entries) {
+      if (entry.content?.cursorType === "Bottom") {
+        nextCursor = entry.content.value;
+        continue;
+      }
+
+      if (entry.content?.cursorType === "Top") {
+        previousCursor = entry.content.value;
+        continue;
+      }
+
+      const itemContent = entry.content?.itemContent;
+      if (itemContent?.tweetDisplayType !== "Tweet") {
+        continue;
+      }
+
+      const tweet = parseTweet(
+        itemContent as unknown as TimelineEntryItemContentRaw,
+        entry.entryId,
+      );
+
+      if (tweet) {
+        items.push(tweet);
+      }
+    }
+  }
+
+  return {
+    items,
+    ...(nextCursor ? { nextCursor } : {}),
+    ...(previousCursor ? { previousCursor } : {}),
+    status: nextCursor ? "has_more" : "at_end",
+  } as TimelinePage<Tweet>;
+};
+
+export const parseSearchTweetsResponse = (
+  body: unknown,
+): TimelinePage<Tweet> => {
+  const response = body as SearchTimelineResponse;
+  const instructions =
+    response.data?.search_by_raw_query?.search_timeline?.timeline?.instructions;
+
+  return parseSearchTweetsTimelinePage(instructions);
+};
+
+export const parseTrendsResponse = (body: unknown): readonly string[] => {
+  const response = body as TrendsGuideResponse;
+  const instructions = response.timeline?.instructions;
+  const entries = instructions?.[1]?.addEntries?.entries;
+  const items = entries?.[1]?.content?.timelineModule?.items;
+
+  if (!instructions || !entries || !items) {
+    throw new InvalidResponseError({
+      endpointId: "Trends",
+      reason: "Missing trends guide entries in Twitter response",
+    });
+  }
+
+  return items.flatMap((item) => {
+    const trendName =
+      item.item?.clientEventInfo?.details?.guideDetails?.transparentGuideDetails
+        ?.trendMetadata?.trendName;
+
+    return trendName ? [trendName] : [];
+  });
 };
 
 export const parseTweetDetailResponse = (
