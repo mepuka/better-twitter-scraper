@@ -18,7 +18,7 @@ const liveMixedLayer = Layer.mergeAll(TwitterPublic.layer, TwitterSearch.layer).
   Layer.provideMerge(GuestAuth.liveLayer),
   Layer.provideMerge(UserAuth.liveLayer),
   Layer.provideMerge(CookieManager.liveLayer),
-  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer),
+  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer()),
   Layer.provideMerge(TwitterConfig.testLayer()),
 );
 

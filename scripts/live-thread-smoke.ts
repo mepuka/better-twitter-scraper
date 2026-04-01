@@ -18,7 +18,7 @@ const liveThreadLayer = TwitterTweets.layer.pipe(
   Layer.provideMerge(ScraperStrategy.standardLayer),
   Layer.provideMerge(UserAuth.liveLayer),
   Layer.provideMerge(CookieManager.liveLayer),
-  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer),
+  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer()),
   Layer.provideMerge(TwitterConfig.testLayer()),
 );
 

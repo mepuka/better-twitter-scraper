@@ -20,7 +20,7 @@ const { cookies: serializedCookies, error: serializedCookiesError } =
 
 const userAuthLiveLayer = UserAuth.liveLayer.pipe(
   Layer.provideMerge(CookieManager.liveLayer),
-  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer),
+  Layer.provideMerge(TwitterHttpClient.cycleTlsLayer()),
   Layer.provideMerge(TwitterConfig.testLayer()),
 );
 

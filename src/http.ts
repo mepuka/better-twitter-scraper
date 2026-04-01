@@ -174,7 +174,10 @@ const toFetchResponse = async (response: Awaited<ReturnType<CycleTLSClient>>) =>
   });
 };
 
-const makeCycleTlsFetch = (client: CycleTLSClient): typeof globalThis.fetch =>
+const makeCycleTlsFetch = (
+  client: CycleTLSClient,
+  proxyUrl?: string,
+): typeof globalThis.fetch =>
   Object.assign(
     async (input: string | URL | Request, init?: RequestInit) => {
       const url =
@@ -200,6 +203,7 @@ const makeCycleTlsFetch = (client: CycleTLSClient): typeof globalThis.fetch =>
           disableGrease: false,
           userAgent: headers["user-agent"] ?? CHROME_USER_AGENT,
           ...(body === undefined ? {} : { body }),
+          ...(proxyUrl ? { proxy: proxyUrl } : {}),
         },
         method.toLowerCase() as
           | "delete"
@@ -221,27 +225,28 @@ const makeCycleTlsFetch = (client: CycleTLSClient): typeof globalThis.fetch =>
     },
   );
 
-const cycleTlsFetchLayer = Layer.effect(
-  FetchHttpClient.Fetch,
-  Effect.acquireRelease(
-    Effect.tryPromise({
-      try: () => initCycleTLS(),
-      catch: (cause) =>
-        new CycleTlsInitError({
-          reason:
-            cause instanceof Error
-              ? `Failed to initialize CycleTLS: ${cause.message}`
-              : "Failed to initialize CycleTLS.",
-          cause,
-        }),
-    }),
-    (client) =>
+const cycleTlsFetchLayer = (proxyUrl?: string) =>
+  Layer.effect(
+    FetchHttpClient.Fetch,
+    Effect.acquireRelease(
       Effect.tryPromise({
-        try: () => client.exit(),
-        catch: () => undefined,
-      }).pipe(Effect.orDie),
-  ).pipe(Effect.map(makeCycleTlsFetch)),
-);
+        try: () => initCycleTLS(),
+        catch: (cause) =>
+          new CycleTlsInitError({
+            reason:
+              cause instanceof Error
+                ? `Failed to initialize CycleTLS: ${cause.message}`
+                : "Failed to initialize CycleTLS.",
+            cause,
+          }),
+      }),
+      (client) =>
+        Effect.tryPromise({
+          try: () => client.exit(),
+          catch: () => undefined,
+        }).pipe(Effect.orDie),
+    ).pipe(Effect.map((client) => makeCycleTlsFetch(client, proxyUrl))),
+  );
 
 const makeMethodRequest = (
   method: PreparedApiRequest<unknown>["method"],
@@ -384,10 +389,12 @@ export class TwitterHttpClient extends ServiceMap.Service<
     );
   }
 
-  static get cycleTlsLayer() {
+  static cycleTlsLayer(proxyUrl?: string) {
     return makeTwitterHttpClientLayer("cycleTls").pipe(
       Layer.provideMerge(
-        FetchHttpClient.layer.pipe(Layer.provideMerge(cycleTlsFetchLayer)),
+        FetchHttpClient.layer.pipe(
+          Layer.provideMerge(cycleTlsFetchLayer(proxyUrl)),
+        ),
       ),
     );
   }
