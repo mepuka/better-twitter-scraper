@@ -526,6 +526,7 @@ const parseTweetsTimelinePage = (
   options: {
     readonly entryPrefixes: readonly string[];
     readonly endpointId:
+      | "CommunityTweets"
       | "HomeTimeline"
       | "Likes"
       | "ListTweets"
@@ -793,6 +794,32 @@ export const parseTweetResultByRestIdResponse = (
   }
 
   return tweet;
+};
+
+interface CommunityTimelineResponse {
+  readonly data?: {
+    readonly communityResults?: {
+      readonly result?: {
+        readonly community_timeline?: {
+          readonly timeline?: {
+            readonly instructions?: ReadonlyArray<TimelineInstructionRaw>;
+          };
+        };
+      };
+    };
+  };
+}
+
+export const parseCommunityTweetsResponse = (body: unknown): TimelinePage<Tweet> => {
+  const response = body as CommunityTimelineResponse;
+  const instructions =
+    response.data?.communityResults?.result?.community_timeline?.timeline?.instructions;
+
+  return parseTweetsTimelinePage(instructions, {
+    entryPrefixes: ["tweet"],
+    endpointId: "CommunityTweets",
+    missingReason: "Missing community timeline instructions in Twitter response",
+  });
 };
 
 export const parseTweetDetailResponse = (

@@ -2,6 +2,7 @@ import type { DmConversationPage, DmInbox } from "./dm-models";
 import { parseDmConversationResponse, parseDmInboxResponse } from "./dm-parsers";
 import type { Profile, TimelinePage, Tweet, TweetSearchMode } from "./models";
 import {
+  parseCommunityTweetsResponse,
   parseFollowersPageResponse,
   parseFollowingPageResponse,
   parseHomeTimelineResponse,
@@ -42,6 +43,7 @@ const queryIds = new Map<string, string>([
   ["TweetDetail", "YCNdW_ZytXfV9YR3cJK9kw"],
   ["HomeTimeline", "HJFjzBgCs16TqxewQOeLNg"],
   ["TweetResultByRestId", "4PdbzTmQ5PTjz9RiureISQ"],
+  ["CommunityTweetsTimeline", "BnowIPH1W7RDwY3EkUgneg"],
 ]);
 
 /**
@@ -183,6 +185,15 @@ const endpointTemplates = {
     },
     features: authenticatedProfilesTimelineFeatures,
   },
+  communityTweets: {
+    variables: {
+      communityId: "1234",
+      count: 20,
+      rankingMode: "Recency",
+      withCommunity: true,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+  },
   searchTimeline: {
     variables: {
       rawQuery: "twitter",
@@ -307,6 +318,7 @@ const stableJson = (value: unknown) => JSON.stringify(normalizeForJson(value));
 
 const relationshipCount = (count: number) => Math.min(count, 50);
 const listTweetsCount = (count: number) => Math.min(count, 200);
+const communityTweetsCount = (count: number) => Math.min(count, 200);
 const searchCount = (count: number) => Math.min(count, 50);
 const tweetsAndRepliesCount = (count: number) => Math.min(count, 40);
 const likedTweetsCount = (count: number) => Math.min(count, 200);
@@ -574,6 +586,31 @@ export const endpointRegistry = {
       }),
       responseKind: "json",
       decode: parseListTweetsPageResponse,
+    };
+  },
+
+  communityTweets(
+    communityId: string,
+    count: number,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Tweet>> {
+    return {
+      endpointId: "CommunityTweets",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "communityTweets",
+      method: "GET",
+      url: buildUrl("CommunityTweetsTimeline", endpointTemplates.communityTweets, {
+        variables: {
+          ...endpointTemplates.communityTweets.variables,
+          communityId,
+          count: communityTweetsCount(count),
+          cursor,
+        },
+      }),
+      responseKind: "json",
+      decode: parseCommunityTweetsResponse,
     };
   },
 

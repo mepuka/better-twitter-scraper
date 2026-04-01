@@ -19,6 +19,13 @@ export class TwitterPublic extends ServiceMap.Service<
       username: string,
       options?: GetTweetsOptions,
     ) => Stream.Stream<Tweet, PublicError>;
+    readonly getLatestTweet: (
+      username: string,
+    ) => Effect.Effect<Tweet | undefined, PublicError>;
+    readonly getCommunityTweets: (
+      communityId: string,
+      options?: GetTweetsOptions,
+    ) => Stream.Stream<Tweet, StrategyError>;
   }
 >()("@better-twitter-scraper/TwitterPublic") {
   static readonly layer = Layer.effect(
@@ -66,9 +73,36 @@ export class TwitterPublic extends ServiceMap.Service<
           }),
         );
 
+      const getLatestTweet = Effect.fn("TwitterPublic.getLatestTweet")(
+        (username: string) =>
+          Stream.runCollect(getTweets(username, { limit: 5 })).pipe(
+            Effect.map((tweets) => tweets.find((t) => !t.isPinned)),
+          ),
+      );
+
+      const fetchCommunityTweetsPage = Effect.fn(
+        "TwitterPublic.fetchCommunityTweetsPage",
+      )((communityId: string, count: number, cursor?: string) =>
+        strategy.execute(
+          endpointRegistry.communityTweets(communityId, count, cursor),
+        ),
+      );
+
+      const getCommunityTweets = (
+        communityId: string,
+        options: GetTweetsOptions = {},
+      ) =>
+        paginateTimeline({
+          remaining: options.limit ?? config.timeline.defaultLimit,
+          fetchPage: (cursor, remaining) =>
+            fetchCommunityTweetsPage(communityId, remaining, cursor),
+        });
+
       return {
         getProfile,
         getTweets,
+        getLatestTweet,
+        getCommunityTweets,
       };
     }),
   );
