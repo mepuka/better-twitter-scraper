@@ -6,7 +6,7 @@ import type {
 } from "./api-types";
 import { InvalidResponseError, ProfileNotFoundError } from "./errors";
 import type { Profile, TimelinePage, Tweet } from "./models";
-import { parseTimestamp } from "./parse-utils";
+import { parseMediaGroups, parseTimestamp, reconstructTweetHtml } from "./parse-utils";
 import type { TweetDetailDocument } from "./tweet-detail-model";
 import { buildTweetDetailDocument } from "./tweet-detail-builder";
 
@@ -214,6 +214,14 @@ const parseTweet = (
   const viewsText = result?.views?.count;
   const views = viewsText ? Number.parseInt(viewsText, 10) : undefined;
 
+  const { photos, videos, sensitiveContent } = parseMediaGroups(
+    legacy.extended_entities?.media ?? [],
+  );
+  const html = reconstructTweetHtml(legacy, text, photos, videos);
+
+  const isEdited =
+    (result?.edit_control?.edit_control_initial?.edit_tweet_ids?.length ?? 0) > 1;
+
   return {
     id,
     ...(legacy.conversation_id_str
@@ -258,6 +266,14 @@ const parseTweet = (
     ...(legacy.retweet_count !== undefined
       ? { retweets: legacy.retweet_count }
       : {}),
+    photos,
+    videos,
+    ...(sensitiveContent ? { sensitiveContent } : {}),
+    ...(html ? { html } : {}),
+    ...(legacy.bookmark_count !== undefined ? { bookmarkCount: legacy.bookmark_count } : {}),
+    ...(isEdited ? { isEdited } : {}),
+    isSelfThread: false,
+    ...(entryId.startsWith("pinned-tweet-") ? { isPinned: true } : {}),
     isQuoted: legacy.quoted_status_id_str !== undefined,
     isReply: legacy.in_reply_to_status_id_str !== undefined,
     isRetweet: legacy.retweeted_status_id_str !== undefined,

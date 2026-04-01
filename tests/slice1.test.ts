@@ -155,6 +155,23 @@ describe("Slice 1 public reads", () => {
           "tweet-3",
         ]);
         expect(tweets[0]?.hashtags).toEqual(["slice1"]);
+        expect(tweets[0]?.photos).toEqual([
+          expect.objectContaining({
+            id: "photo-1",
+            url: "https://pbs.twimg.com/media/tweet1-photo.jpg",
+            altText: "A photo",
+          }),
+        ]);
+        expect(tweets[0]?.videos).toEqual([
+          expect.objectContaining({
+            id: "video-1",
+            preview: "https://pbs.twimg.com/media/tweet1-video-thumb.jpg",
+            url: "https://video.twimg.com/ext_tw_video/tweet1.mp4",
+          }),
+        ]);
+        // Second tweet should have empty media
+        expect(tweets[1]?.photos).toEqual([]);
+        expect(tweets[1]?.videos).toEqual([]);
         expect(tweets[1]?.mentions).toEqual([
           {
             id: "42",

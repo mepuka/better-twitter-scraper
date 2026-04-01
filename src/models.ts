@@ -1,3 +1,5 @@
+import type { TweetPhoto, TweetVideo } from "./tweet-detail-model";
+
 export interface Mention {
   readonly id: string;
   readonly username?: string;
@@ -45,6 +47,14 @@ export interface Tweet {
   readonly likes?: number;
   readonly replies?: number;
   readonly retweets?: number;
+  readonly photos: readonly TweetPhoto[];
+  readonly videos: readonly TweetVideo[];
+  readonly sensitiveContent?: boolean;
+  readonly html?: string;
+  readonly bookmarkCount?: number;
+  readonly isEdited?: boolean;
+  readonly isSelfThread?: boolean;
+  readonly isPinned?: boolean;
   readonly isQuoted: boolean;
   readonly isReply: boolean;
   readonly isRetweet: boolean;

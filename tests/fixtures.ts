@@ -65,6 +65,18 @@ const tweetResult = (tweet: {
     readonly username: string;
     readonly name: string;
   }>;
+  readonly photos?: ReadonlyArray<{
+    readonly id: string;
+    readonly url: string;
+    readonly altText?: string;
+    readonly tcoUrl: string;
+  }>;
+  readonly videos?: ReadonlyArray<{
+    readonly id: string;
+    readonly preview: string;
+    readonly url: string;
+    readonly tcoUrl: string;
+  }>;
   readonly views?: string;
 }) => ({
   __typename: "Tweet",
@@ -89,6 +101,35 @@ const tweetResult = (tweet: {
         name: mention.name,
       })),
     },
+    extended_entities:
+      tweet.photos || tweet.videos
+        ? {
+            media: [
+              ...(tweet.photos ?? []).map((photo) => ({
+                ext_alt_text: photo.altText,
+                id_str: photo.id,
+                media_url_https: photo.url,
+                type: "photo",
+                url: photo.tcoUrl,
+              })),
+              ...(tweet.videos ?? []).map((video) => ({
+                id_str: video.id,
+                media_url_https: video.preview,
+                type: "video",
+                url: video.tcoUrl,
+                video_info: {
+                  variants: [
+                    {
+                      bitrate: 832000,
+                      content_type: "video/mp4",
+                      url: video.url,
+                    },
+                  ],
+                },
+              })),
+            ],
+          }
+        : undefined,
   },
   core: {
     user_results: {
@@ -157,6 +198,18 @@ export const tweetsPageOneFixture = {
                     hashtags: ["slice1"],
                     urls: ["https://example.com/1"],
                     views: "17",
+                    photos: [{
+                      id: "photo-1",
+                      url: "https://pbs.twimg.com/media/tweet1-photo.jpg",
+                      altText: "A photo",
+                      tcoUrl: "https://t.co/photo1",
+                    }],
+                    videos: [{
+                      id: "video-1",
+                      preview: "https://pbs.twimg.com/media/tweet1-video-thumb.jpg",
+                      url: "https://video.twimg.com/ext_tw_video/tweet1.mp4",
+                      tcoUrl: "https://t.co/video1",
+                    }],
                   }),
                   tweetEntry({
                     id: "tweet-2",
