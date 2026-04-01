@@ -3,7 +3,7 @@ import { Effect, Layer, ServiceMap, Stream } from "effect";
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
 import { InvalidResponseError } from "./errors";
-import type { GetTweetsOptions, Profile, TimelinePage, Tweet } from "./models";
+import type { GetTweetsOptions, Profile, Tweet } from "./models";
 import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
 
@@ -31,7 +31,7 @@ export class TwitterPublic extends ServiceMap.Service<
         (username: string) =>
           strategy.execute(
             endpointRegistry.userByScreenName(username),
-          ) as Effect.Effect<Profile, StrategyError>,
+          ),
       );
 
       const fetchTweetsPage = Effect.fn("TwitterPublic.fetchTweetsPage")(
@@ -43,7 +43,7 @@ export class TwitterPublic extends ServiceMap.Service<
               config.timeline.includePromotedContent,
               cursor,
             ),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
+          ),
       );
 
       const getTweets = (username: string, options: GetTweetsOptions = {}) =>

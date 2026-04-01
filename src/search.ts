@@ -44,7 +44,7 @@ export class TwitterSearch extends ServiceMap.Service<
               Math.min(count, config.search.maxPageSize),
               cursor,
             ),
-          ) as Effect.Effect<TimelinePage<Profile>, StrategyError>,
+          ),
       );
 
       const fetchTweetsPage = Effect.fn("TwitterSearch.fetchTweetsPage")(
@@ -56,7 +56,7 @@ export class TwitterSearch extends ServiceMap.Service<
               mode ?? "top",
               cursor,
             ),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
+          ),
       );
 
       const streamSearch = <T>(

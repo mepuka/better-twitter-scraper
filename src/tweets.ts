@@ -55,7 +55,7 @@ export class TwitterTweets extends ServiceMap.Service<
         (id: string) =>
           strategy.execute(
             endpointRegistry.tweetDetail(id),
-          ) as Effect.Effect<TweetDetailDocument, TweetDetailError>,
+          ),
       );
 
       const fetchTweetsAndRepliesPage = Effect.fn(
@@ -63,28 +63,28 @@ export class TwitterTweets extends ServiceMap.Service<
       )((userId: string, count: number, cursor?: string) =>
         strategy.execute(
           endpointRegistry.userTweetsAndReplies(userId, count, cursor),
-        ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
+        ),
       );
 
       const fetchLikedTweetsPage = Effect.fn("TwitterTweets.fetchLikedTweetsPage")(
         (userId: string, count: number, cursor?: string) =>
           strategy.execute(
             endpointRegistry.likedTweets(userId, count, cursor),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
+          ),
       );
 
       const fetchHomeTimelinePage = Effect.fn("TwitterTweets.fetchHomeTimelinePage")(
         (count: number, cursor?: string) =>
           strategy.execute(
             endpointRegistry.homeTimeline(count, cursor),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
+          ),
       );
 
       const getTweetAnonymous = Effect.fn("TwitterTweets.getTweetAnonymous")(
         (id: string) =>
           strategy.execute(
             endpointRegistry.tweetResultByRestId(id),
-          ) as Effect.Effect<Tweet, StrategyError | TweetNotFoundError>,
+          ),
       );
 
       const getTweet = Effect.fn("TwitterTweets.getTweet")((id: string) =>

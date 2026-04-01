@@ -20,14 +20,11 @@ export class TwitterTrends extends ServiceMap.Service<
       const auth = yield* UserAuth;
       const cookies = yield* CookieManager;
       const strategy = yield* ScraperStrategy;
-      const trendsCache = yield* Cache.makeWith<string, readonly string[], TrendsError>(
+      const trendsCache = yield* Cache.makeWith<string, readonly string[], StrategyError>(
         {
           capacity: 4,
           lookup: () =>
-            strategy.execute(endpointRegistry.trends()) as Effect.Effect<
-              readonly string[],
-              TrendsError
-            >,
+            strategy.execute(endpointRegistry.trends()),
           timeToLive: (exit) =>
             Exit.isSuccess(exit) ? Duration.seconds(30) : Duration.millis(0),
         },

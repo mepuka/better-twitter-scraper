@@ -3,7 +3,7 @@ import { Effect, Layer, ServiceMap, Stream } from "effect";
 import { TwitterConfig } from "./config";
 import { endpointRegistry } from "./endpoints";
 import { AuthenticationError, InvalidResponseError } from "./errors";
-import type { GetTweetsOptions, TimelinePage, Tweet } from "./models";
+import type { GetTweetsOptions, Tweet } from "./models";
 import { paginateTimeline } from "./pagination";
 import { ScraperStrategy, type StrategyError } from "./strategy";
 import { UserAuth } from "./user-auth";
@@ -30,7 +30,7 @@ export class TwitterLists extends ServiceMap.Service<
         (listId: string, count: number, cursor?: string) =>
           strategy.execute(
             endpointRegistry.listTweets(listId, count, cursor),
-          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
+          ),
       );
 
       const getTweets = (listId: string, options: GetTweetsOptions = {}) =>

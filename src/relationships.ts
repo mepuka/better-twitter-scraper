@@ -39,7 +39,7 @@ export class TwitterRelationships extends ServiceMap.Service<
             Math.min(count, config.search.maxPageSize),
             cursor,
           ),
-        ) as Effect.Effect<TimelinePage<Profile>, StrategyError>,
+        ),
       );
 
       const fetchFollowingPage = Effect.fn(
@@ -51,7 +51,7 @@ export class TwitterRelationships extends ServiceMap.Service<
             Math.min(count, config.search.maxPageSize),
             cursor,
           ),
-        ) as Effect.Effect<TimelinePage<Profile>, StrategyError>,
+        ),
       );
 
       const streamProfiles = (
