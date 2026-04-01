@@ -1,3 +1,5 @@
+import type { DmConversationPage, DmInbox } from "./dm-models";
+import { parseDmConversationResponse, parseDmInboxResponse } from "./dm-parsers";
 import type { Profile, TimelinePage, Tweet, TweetSearchMode } from "./models";
 import {
   parseFollowersPageResponse,
@@ -348,6 +350,97 @@ const buildTrendsUrl = () => {
   params.set("entity_tokens", "false");
 
   return `https://api.x.com/2/guide.json?${params.toString()}`;
+};
+
+// ---------------------------------------------------------------------------
+// DM URL builders (REST 1.1 API)
+// ---------------------------------------------------------------------------
+
+const addDmBaseParams = (params: URLSearchParams) => {
+  params.set("include_profile_interstitial_type", "1");
+  params.set("include_blocking", "1");
+  params.set("include_blocked_by", "1");
+  params.set("include_followed_by", "1");
+  params.set("include_want_retweets", "1");
+  params.set("include_mute_edge", "1");
+  params.set("include_can_dm", "1");
+  params.set("include_can_media_tag", "1");
+  params.set("include_ext_has_nft_avatar", "1");
+  params.set("include_ext_is_blue_verified", "1");
+  params.set("include_ext_verified_type", "1");
+  params.set("skip_status", "1");
+  params.set("cards_platform", "Web-12");
+  params.set("include_cards", "1");
+  params.set("include_ext_alt_text", "true");
+  params.set("include_ext_limited_action_results", "false");
+  params.set("include_quote_count", "true");
+  params.set("include_reply_count", "1");
+  params.set("tweet_mode", "extended");
+  params.set("include_ext_collab_control", "true");
+  params.set("include_ext_views", "true");
+  params.set("include_entities", "true");
+  params.set("include_user_entities", "true");
+  params.set("include_ext_media_color", "true");
+  params.set("include_ext_media_availability", "true");
+  params.set("include_ext_sensitive_media_warning", "true");
+  params.set("include_ext_trusted_friends_metadata", "true");
+  params.set("send_error_codes", "true");
+  params.set("simple_quoted_tweet", "true");
+  params.set("include_tweet_replies", "false");
+};
+
+const buildDmInboxUrl = () => {
+  const params = new URLSearchParams();
+  addDmBaseParams(params);
+
+  params.set("nsfw_filtering_enabled", "false");
+  params.set("filter_low_quality", "true");
+  params.set("include_quality", "all");
+  params.set("include_ext_profile_image_shape", "1");
+  params.set("dm_secret_conversations_enabled", "false");
+  params.set("krs_registration_enabled", "false");
+  params.set("include_ext_limited_action_results", "true");
+  params.set("dm_users", "true");
+  params.set("include_groups", "true");
+  params.set("include_inbox_timelines", "true");
+  params.set("supports_reactions", "true");
+  params.set("supports_edit", "true");
+  params.set("include_ext_edit_control", "true");
+  params.set("include_ext_business_affiliations_label", "true");
+  params.set("include_ext_parody_commentary_fan_label", "true");
+  params.set(
+    "ext",
+    "mediaColor,altText,mediaStats,highlightedLabel,parodyCommentaryFanLabel,voiceInfo,birdwatchPivot,superFollowMetadata,unmentionInfo,editControl,article",
+  );
+
+  return `https://api.x.com/1.1/dm/inbox_initial_state.json?${params.toString()}`;
+};
+
+const buildDmConversationUrl = (conversationId: string, maxId?: string) => {
+  const params = new URLSearchParams();
+  addDmBaseParams(params);
+
+  params.set("context", "FETCH_DM_CONVERSATION_HISTORY");
+  params.set("include_ext_profile_image_shape", "1");
+  params.set("dm_secret_conversations_enabled", "false");
+  params.set("krs_registration_enabled", "false");
+  params.set("include_ext_limited_action_results", "true");
+  params.set("dm_users", "true");
+  params.set("include_groups", "true");
+  params.set("include_inbox_timelines", "true");
+  params.set("supports_reactions", "true");
+  params.set("supports_edit", "true");
+  params.set("include_conversation_info", "true");
+  params.set(
+    "ext",
+    "mediaColor,altText,mediaStats,highlightedLabel,parodyCommentaryFanLabel,voiceInfo,birdwatchPivot,superFollowMetadata,unmentionInfo,editControl,article",
+  );
+
+  if (maxId) {
+    params.set("max_id", maxId);
+  }
+
+  return `https://api.x.com/1.1/dm/conversation/${conversationId}.json?${params.toString()}`;
 };
 
 const searchProductForMode = (mode: TweetSearchMode) => {
@@ -712,6 +805,37 @@ export const endpointRegistry = {
       url: buildTrendsUrl(),
       responseKind: "json",
       decode: parseTrendsResponse,
+    };
+  },
+
+  dmInbox(): ApiRequest<DmInbox> {
+    return {
+      endpointId: "DmInbox",
+      family: "rest",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "dmInbox",
+      method: "GET",
+      url: buildDmInboxUrl(),
+      responseKind: "json",
+      decode: parseDmInboxResponse,
+    };
+  },
+
+  dmConversation(
+    conversationId: string,
+    maxId?: string,
+  ): ApiRequest<DmConversationPage> {
+    return {
+      endpointId: "DmConversation",
+      family: "rest",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "dmConversation",
+      method: "GET",
+      url: buildDmConversationUrl(conversationId, maxId),
+      responseKind: "json",
+      decode: (body) => parseDmConversationResponse(body, conversationId),
     };
   },
 } as const;
