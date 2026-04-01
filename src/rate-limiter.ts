@@ -4,7 +4,7 @@ import { RateLimitError } from "./errors";
 import { logDebugDecision } from "./observability";
 import type { RateLimitBucket } from "./request";
 
-interface BucketState {
+export interface BucketState {
   readonly blockedUntil?: number;
   readonly limit?: number;
   readonly remaining?: number;
