@@ -6,6 +6,7 @@ import type {
 } from "./api-types";
 import { InvalidResponseError, ProfileNotFoundError } from "./errors";
 import type { Profile, TimelinePage, Tweet } from "./models";
+import { parseTimestamp } from "./parse-utils";
 import type { TweetDetailDocument } from "./tweet-detail-model";
 import { buildTweetDetailDocument } from "./tweet-detail-builder";
 
@@ -175,28 +176,6 @@ interface TrendsGuideResponse {
 
 const getAvatarOriginalSizeUrl = (avatarUrl: string | undefined) =>
   avatarUrl ? avatarUrl.replace("_normal", "") : undefined;
-
-const parseTimestamp = (createdAt: string | undefined) => {
-  if (!createdAt) {
-    return {
-      timeParsed: undefined,
-      timestamp: undefined,
-    };
-  }
-
-  const timeParsed = new Date(Date.parse(createdAt));
-  if (Number.isNaN(timeParsed.valueOf())) {
-    return {
-      timeParsed: undefined,
-      timestamp: undefined,
-    };
-  }
-
-  return {
-    timeParsed,
-    timestamp: Math.floor(timeParsed.valueOf() / 1000),
-  };
-};
 
 const extractTweetResult = (content: TimelineEntryItemContentRaw) => {
   const rawResult = content.tweet_results?.result ?? content.tweetResult?.result;
