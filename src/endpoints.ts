@@ -2,11 +2,13 @@ import type { Profile, TimelinePage, Tweet, TweetSearchMode } from "./models";
 import {
   parseFollowersPageResponse,
   parseFollowingPageResponse,
+  parseHomeTimelineResponse,
   parseListTweetsPageResponse,
   parseProfileResponse,
   parseSearchProfilesResponse,
   parseSearchTweetsResponse,
   parseTweetDetailResponse,
+  parseTweetResultByRestIdResponse,
   parseTrendsResponse,
   parseTweetsAndRepliesPageResponse,
   parseTimelinePageResponse,
@@ -204,6 +206,35 @@ const endpointTemplates = {
       withGrokTranslatedBio: false,
     },
     features: authenticatedProfilesTimelineFeatures,
+  },
+  homeTimeline: {
+    url: "https://api.x.com/graphql/HJFjzBgCs16TqxewQOeLNg/HomeTimeline",
+    variables: {
+      count: 20,
+      includePromotedContent: true,
+      latestControlAvailable: true,
+      requestContext: "launch",
+      withCommunity: true,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+    fieldToggles: {
+      withArticlePlainText: false,
+    },
+  },
+  tweetResultByRestId: {
+    url: "https://api.x.com/graphql/4PdbzTmQ5PTjz9RiureISQ/TweetResultByRestId",
+    variables: {
+      tweetId: "1985465713096794294",
+      includePromotedContent: true,
+      withBirdwatchNotes: true,
+      withVoice: true,
+      withCommunity: true,
+    },
+    features: authenticatedProfilesTimelineFeatures,
+    fieldToggles: {
+      withArticleRichContentState: true,
+      withArticlePlainText: false,
+    },
   },
   tweetDetail: {
     url: "https://api.x.com/graphql/YCNdW_ZytXfV9YR3cJK9kw/TweetDetail",
@@ -579,6 +610,48 @@ export const endpointRegistry = {
       }),
       responseKind: "json",
       decode: parseLikedTweetsPageResponse,
+    };
+  },
+
+  homeTimeline(
+    count: number,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Tweet>> {
+    return {
+      endpointId: "HomeTimeline",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "homeTimeline",
+      method: "GET",
+      url: buildUrl(endpointTemplates.homeTimeline, {
+        variables: {
+          ...endpointTemplates.homeTimeline.variables,
+          count,
+          cursor,
+        },
+      }),
+      responseKind: "json",
+      decode: parseHomeTimelineResponse,
+    };
+  },
+
+  tweetResultByRestId(id: string): ApiRequest<Tweet> {
+    return {
+      endpointId: "TweetResultByRestId",
+      family: "graphql",
+      authRequirement: "guest",
+      bearerToken: "secondary",
+      rateLimitBucket: "tweetResultByRestId",
+      method: "GET",
+      url: buildUrl(endpointTemplates.tweetResultByRestId, {
+        variables: {
+          ...endpointTemplates.tweetResultByRestId.variables,
+          tweetId: id,
+        },
+      }),
+      responseKind: "json",
+      decode: (body) => parseTweetResultByRestIdResponse(body, id),
     };
   },
 

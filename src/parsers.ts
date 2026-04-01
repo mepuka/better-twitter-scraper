@@ -4,7 +4,7 @@ import type {
   TimelineInstructionRaw,
   TimelineResultRaw,
 } from "./api-types";
-import { InvalidResponseError, ProfileNotFoundError } from "./errors";
+import { InvalidResponseError, ProfileNotFoundError, TweetNotFoundError } from "./errors";
 import type { Profile, TimelinePage, Tweet } from "./models";
 import { parseMediaGroups, parseTimestamp, reconstructTweetHtml } from "./parse-utils";
 import type { TweetDetailDocument } from "./tweet-detail-model";
@@ -141,6 +141,22 @@ interface ListTimelineResponse {
         };
       };
     };
+  };
+}
+
+interface HomeTimelineResponse {
+  readonly data?: {
+    readonly home?: {
+      readonly home_timeline_urt?: {
+        readonly instructions?: ReadonlyArray<TimelineInstructionRaw>;
+      };
+    };
+  };
+}
+
+interface TweetResultByRestIdResponse {
+  readonly data?: {
+    readonly tweetResult?: TimelineEntryItemContentRaw;
   };
 }
 
@@ -508,6 +524,7 @@ const parseTweetsTimelinePage = (
   options: {
     readonly entryPrefixes: readonly string[];
     readonly endpointId:
+      | "HomeTimeline"
       | "Likes"
       | "ListTweets"
       | "UserTweets"
@@ -744,6 +761,36 @@ export const parseTrendsResponse = (body: unknown): readonly string[] => {
   }
 
   return trends;
+};
+
+export const parseHomeTimelineResponse = (body: unknown): TimelinePage<Tweet> => {
+  const response = body as HomeTimelineResponse;
+  const instructions =
+    response.data?.home?.home_timeline_urt?.instructions;
+
+  return parseTweetsTimelinePage(instructions, {
+    entryPrefixes: ["tweet", "promoted-tweet"],
+    endpointId: "HomeTimeline",
+    missingReason: "Missing home timeline instructions in Twitter response",
+  });
+};
+
+export const parseTweetResultByRestIdResponse = (
+  body: unknown,
+  id: string,
+): Tweet => {
+  const response = body as TweetResultByRestIdResponse;
+  const content = response.data?.tweetResult;
+  if (!content) {
+    throw new TweetNotFoundError({ id });
+  }
+
+  const tweet = parseTweet(content, `tweet-${id}`);
+  if (!tweet) {
+    throw new TweetNotFoundError({ id });
+  }
+
+  return tweet;
 };
 
 export const parseTweetDetailResponse = (

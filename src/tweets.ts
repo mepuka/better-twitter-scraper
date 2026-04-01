@@ -24,6 +24,9 @@ export class TwitterTweets extends ServiceMap.Service<
     readonly getTweet: (
       id: string,
     ) => Effect.Effect<TweetDetailDocument, TweetDetailError>;
+    readonly getTweetAnonymous: (
+      id: string,
+    ) => Effect.Effect<Tweet, StrategyError | TweetNotFoundError>;
     readonly getThread: (
       id: string,
     ) => Effect.Effect<readonly TweetDetailNode[], TweetDetailError>;
@@ -33,6 +36,9 @@ export class TwitterTweets extends ServiceMap.Service<
     ) => Stream.Stream<Tweet, TweetTimelineError>;
     readonly getLikedTweets: (
       userId: string,
+      options?: GetTweetsOptions,
+    ) => Stream.Stream<Tweet, TweetTimelineError>;
+    readonly getHomeTimeline: (
       options?: GetTweetsOptions,
     ) => Stream.Stream<Tweet, TweetTimelineError>;
   }
@@ -65,6 +71,20 @@ export class TwitterTweets extends ServiceMap.Service<
           strategy.execute(
             endpointRegistry.likedTweets(userId, count, cursor),
           ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
+      );
+
+      const fetchHomeTimelinePage = Effect.fn("TwitterTweets.fetchHomeTimelinePage")(
+        (count: number, cursor?: string) =>
+          strategy.execute(
+            endpointRegistry.homeTimeline(count, cursor),
+          ) as Effect.Effect<TimelinePage<Tweet>, StrategyError>,
+      );
+
+      const getTweetAnonymous = Effect.fn("TwitterTweets.getTweetAnonymous")(
+        (id: string) =>
+          strategy.execute(
+            endpointRegistry.tweetResultByRestId(id),
+          ) as Effect.Effect<Tweet, StrategyError | TweetNotFoundError>,
       );
 
       const getTweet = Effect.fn("TwitterTweets.getTweet")((id: string) =>
@@ -134,11 +154,32 @@ export class TwitterTweets extends ServiceMap.Service<
           fetchLikedTweetsPage,
         );
 
+      const getHomeTimeline = (options: GetTweetsOptions = {}) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const loggedIn = yield* auth.isLoggedIn();
+            if (!loggedIn) {
+              return yield* new AuthenticationError({
+                reason:
+                  "Authenticated home timeline lookup requires restored session cookies.",
+              });
+            }
+
+            return paginateTimeline({
+              remaining: options.limit ?? config.timeline.defaultLimit,
+              fetchPage: (cursor, remaining) =>
+                fetchHomeTimelinePage(remaining, cursor),
+            });
+          }),
+        );
+
       return {
         getTweet,
+        getTweetAnonymous,
         getThread,
         getTweetsAndReplies,
         getLikedTweets,
+        getHomeTimeline,
       };
     }),
   );
