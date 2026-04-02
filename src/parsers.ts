@@ -288,8 +288,25 @@ const parseTweet = (
     ...(html ? { html } : {}),
     ...(legacy.bookmark_count !== undefined ? { bookmarkCount: legacy.bookmark_count } : {}),
     ...(isEdited ? { isEdited } : {}),
+    ...(legacy.place ? {
+      place: {
+        ...(legacy.place.id ? { id: legacy.place.id } : {}),
+        ...(legacy.place.name ? { name: legacy.place.name } : {}),
+        ...(legacy.place.full_name ? { fullName: legacy.place.full_name } : {}),
+        ...(legacy.place.country ? { country: legacy.place.country } : {}),
+        ...(legacy.place.country_code ? { countryCode: legacy.place.country_code } : {}),
+        ...(legacy.place.place_type ? { placeType: legacy.place.place_type } : {}),
+        ...(legacy.place.bounding_box ? {
+          boundingBox: {
+            ...(legacy.place.bounding_box.type ? { type: legacy.place.bounding_box.type } : {}),
+            ...(legacy.place.bounding_box.coordinates ? { coordinates: legacy.place.bounding_box.coordinates } : {}),
+          },
+        } : {}),
+      },
+    } : {}),
     ...(content.tweetDisplayType === "SelfThread" ? { isSelfThread: true } : {}),
     ...(entryId.startsWith("pinned-tweet-") ? { isPinned: true } : {}),
+    ...(entryId.startsWith("promoted-tweet-") ? { isPromoted: true } : {}),
     isQuoted: legacy.quoted_status_id_str !== undefined,
     isReply: legacy.in_reply_to_status_id_str !== undefined,
     isRetweet: legacy.retweeted_status_id_str !== undefined,

@@ -21,6 +21,7 @@ export class TwitterPublic extends ServiceMap.Service<
     ) => Stream.Stream<Tweet, PublicError>;
     readonly getLatestTweet: (
       username: string,
+      options?: { includeRetweets?: boolean },
     ) => Effect.Effect<Tweet | undefined, PublicError>;
     readonly getCommunityTweets: (
       communityId: string,
@@ -74,9 +75,14 @@ export class TwitterPublic extends ServiceMap.Service<
         );
 
       const getLatestTweet = Effect.fn("TwitterPublic.getLatestTweet")(
-        (username: string) =>
-          Stream.runCollect(getTweets(username, { limit: 5 })).pipe(
-            Effect.map((tweets) => tweets.find((t) => !t.isPinned)),
+        (username: string, options?: { includeRetweets?: boolean }) =>
+          Stream.runCollect(getTweets(username, { limit: 10 })).pipe(
+            Effect.map((tweets) =>
+              tweets.find((t) =>
+                !t.isPinned &&
+                (options?.includeRetweets !== false || !t.isRetweet)
+              ),
+            ),
           ),
       );
 

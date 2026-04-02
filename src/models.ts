@@ -1,5 +1,5 @@
 import { Brand, Schema } from "effect";
-import { TweetPhoto, TweetVideo } from "./tweet-detail-model";
+import { TweetPhoto, TweetPlace, TweetVideo } from "./tweet-detail-model";
 
 export type UserId = string & Brand.Brand<"UserId">;
 export const UserId = Brand.nominal<UserId>();
@@ -68,12 +68,14 @@ export class Tweet extends Schema.Class<Tweet>("Tweet")({
   isEdited: Schema.optionalKey(Schema.Boolean),
   isSelfThread: Schema.optionalKey(Schema.Boolean),
   isPinned: Schema.optionalKey(Schema.Boolean),
+  isPromoted: Schema.optionalKey(Schema.Boolean),
   isQuoted: Schema.Boolean,
   isReply: Schema.Boolean,
   isRetweet: Schema.Boolean,
   quotedTweetId: Schema.optionalKey(Schema.String),
   inReplyToTweetId: Schema.optionalKey(Schema.String),
   retweetedTweetId: Schema.optionalKey(Schema.String),
+  place: Schema.optionalKey(TweetPlace),
 }) {}
 
 export type TimelineStatus = "has_more" | "at_end";

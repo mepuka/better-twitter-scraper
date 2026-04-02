@@ -6,7 +6,7 @@ const TweetMention = Schema.Struct({
   username: Schema.optionalKey(Schema.String),
 });
 
-const TweetPlace = Schema.Struct({
+export const TweetPlace = Schema.Struct({
   boundingBox: Schema.optionalKey(
     Schema.Struct({
       coordinates: Schema.optionalKey(
