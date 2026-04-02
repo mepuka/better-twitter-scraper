@@ -62,6 +62,7 @@ export class TwitterRelationships extends ServiceMap.Service<
       ) =>
         paginateTimeline({
           remaining: options.limit ?? config.search.defaultLimit,
+          jitterMs: config.pagination.jitterMs,
           fetchPage: (cursor, remaining) =>
             fetchPage(userId, remaining, cursor),
         });

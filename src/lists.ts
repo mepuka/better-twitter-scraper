@@ -34,6 +34,7 @@ export class TwitterLists extends ServiceMap.Service<
       const getTweets = (listId: string, options: GetTweetsOptions = {}) =>
         paginateTimeline({
           remaining: options.limit ?? config.timeline.defaultLimit,
+          jitterMs: config.pagination.jitterMs,
           fetchPage: (cursor, remaining) =>
             fetchTweetsPage(listId, remaining, cursor),
         });

@@ -102,6 +102,7 @@ export class TwitterTweets extends ServiceMap.Service<
       ) =>
         paginateTimeline({
           remaining: options.limit ?? config.timeline.defaultLimit,
+          jitterMs: config.pagination.jitterMs,
           fetchPage: (cursor, remaining) =>
             fetchPage(userId, remaining, cursor),
         });
@@ -129,6 +130,7 @@ export class TwitterTweets extends ServiceMap.Service<
       const getHomeTimeline = (options: GetTweetsOptions = {}) =>
         paginateTimeline({
           remaining: options.limit ?? config.timeline.defaultLimit,
+          jitterMs: config.pagination.jitterMs,
           fetchPage: (cursor, remaining) =>
             fetchHomeTimelinePage(remaining, cursor),
         });

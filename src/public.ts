@@ -23,6 +23,14 @@ export class TwitterPublic extends ServiceMap.Service<
       username: string,
       options?: { includeRetweets?: boolean },
     ) => Effect.Effect<Tweet | undefined, PublicError>;
+    readonly getTweetsAndReplies: (
+      username: string,
+      options?: GetTweetsOptions,
+    ) => Stream.Stream<Tweet, PublicError>;
+    readonly getLikedTweets: (
+      username: string,
+      options?: GetTweetsOptions,
+    ) => Stream.Stream<Tweet, PublicError>;
     readonly getCommunityTweets: (
       communityId: string,
       options?: GetTweetsOptions,
@@ -68,6 +76,7 @@ export class TwitterPublic extends ServiceMap.Service<
 
             return paginateTimeline({
               remaining: options.limit ?? config.timeline.defaultLimit,
+              jitterMs: config.pagination.jitterMs,
               fetchPage: (cursor, remaining) =>
                 fetchTweetsPage(userId, remaining, cursor),
             });
@@ -86,6 +95,64 @@ export class TwitterPublic extends ServiceMap.Service<
           ),
       );
 
+      const fetchTweetsAndRepliesPage = Effect.fn(
+        "TwitterPublic.fetchTweetsAndRepliesPage",
+      )((userId: string, count: number, cursor?: string) =>
+        strategy.execute(
+          endpointRegistry.userTweetsAndReplies(userId, count, cursor),
+        ),
+      );
+
+      const getTweetsAndReplies = (username: string, options: GetTweetsOptions = {}) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const profile = yield* getProfile(username);
+            const userId = profile.userId;
+            if (!userId) {
+              return yield* new InvalidResponseError({
+                endpointId: "UserByScreenName",
+                reason: `Profile ${username} did not include a userId`,
+              });
+            }
+
+            return paginateTimeline({
+              remaining: options.limit ?? config.timeline.defaultLimit,
+              jitterMs: config.pagination.jitterMs,
+              fetchPage: (cursor, remaining) =>
+                fetchTweetsAndRepliesPage(userId, remaining, cursor),
+            });
+          }),
+        );
+
+      const fetchLikedTweetsPage = Effect.fn(
+        "TwitterPublic.fetchLikedTweetsPage",
+      )((userId: string, count: number, cursor?: string) =>
+        strategy.execute(
+          endpointRegistry.likedTweets(userId, count, cursor),
+        ),
+      );
+
+      const getLikedTweets = (username: string, options: GetTweetsOptions = {}) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const profile = yield* getProfile(username);
+            const userId = profile.userId;
+            if (!userId) {
+              return yield* new InvalidResponseError({
+                endpointId: "UserByScreenName",
+                reason: `Profile ${username} did not include a userId`,
+              });
+            }
+
+            return paginateTimeline({
+              remaining: options.limit ?? config.timeline.defaultLimit,
+              jitterMs: config.pagination.jitterMs,
+              fetchPage: (cursor, remaining) =>
+                fetchLikedTweetsPage(userId, remaining, cursor),
+            });
+          }),
+        );
+
       const fetchCommunityTweetsPage = Effect.fn(
         "TwitterPublic.fetchCommunityTweetsPage",
       )((communityId: string, count: number, cursor?: string) =>
@@ -100,6 +167,7 @@ export class TwitterPublic extends ServiceMap.Service<
       ) =>
         paginateTimeline({
           remaining: options.limit ?? config.timeline.defaultLimit,
+          jitterMs: config.pagination.jitterMs,
           fetchPage: (cursor, remaining) =>
             fetchCommunityTweetsPage(communityId, remaining, cursor),
         });
@@ -108,6 +176,8 @@ export class TwitterPublic extends ServiceMap.Service<
         getProfile,
         getTweets,
         getLatestTweet,
+        getTweetsAndReplies,
+        getLikedTweets,
         getCommunityTweets,
       };
     }),

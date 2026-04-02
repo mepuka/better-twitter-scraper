@@ -29,6 +29,9 @@ export interface TwitterConfigShape {
     readonly defaultLimit: number;
     readonly maxPageSize: number;
   };
+  readonly pagination: {
+    readonly jitterMs: number;
+  };
   readonly strategy: {
     readonly retryLimit: number;
   };
@@ -38,6 +41,7 @@ const makeConfig = (
   overrides: Partial<{
     readonly bearerTokens: Partial<TwitterConfigShape["bearerTokens"]>;
     readonly guestTokenTtl: Duration.Duration;
+    readonly pagination: Partial<TwitterConfigShape["pagination"]>;
     readonly proxyUrl?: string;
     readonly requestTimeout: Duration.Duration;
     readonly search: Partial<TwitterConfigShape["search"]>;
@@ -67,6 +71,9 @@ const makeConfig = (
     maxPageSize: overrides.timeline?.maxPageSize ?? 40,
     includePromotedContent:
       overrides.timeline?.includePromotedContent ?? false,
+  },
+  pagination: {
+    jitterMs: overrides.pagination?.jitterMs ?? 500,
   },
   search: {
     defaultLimit: overrides.search?.defaultLimit ?? 20,
@@ -116,6 +123,9 @@ export class TwitterConfig extends ServiceMap.Service<
         const userAgent = yield* Config.string("TWITTER_USER_AGENT").pipe(
           Config.withDefault(CHROME_USER_AGENT),
         );
+        const paginationJitterMs = yield* Config.number(
+          "TWITTER_PAGINATION_JITTER_MS",
+        ).pipe(Config.withDefault(500));
         const strategyRetryLimit = yield* Config.number(
           "TWITTER_STRATEGY_RETRY_LIMIT",
         ).pipe(Config.withDefault(1));
@@ -138,6 +148,9 @@ export class TwitterConfig extends ServiceMap.Service<
             maxPageSize: timelineMaxPageSize,
             includePromotedContent: timelineIncludePromotedContent,
           },
+          pagination: {
+            jitterMs: paginationJitterMs,
+          },
           search: {
             defaultLimit: searchDefaultLimit,
             maxPageSize: searchMaxPageSize,
@@ -154,6 +167,7 @@ export class TwitterConfig extends ServiceMap.Service<
     overrides: Partial<{
       readonly bearerTokens: Partial<TwitterConfigShape["bearerTokens"]>;
       readonly guestTokenTtl: Duration.Duration;
+      readonly pagination: Partial<TwitterConfigShape["pagination"]>;
       readonly proxyUrl?: string;
       readonly requestTimeout: Duration.Duration;
       readonly search: Partial<TwitterConfigShape["search"]>;
@@ -163,6 +177,12 @@ export class TwitterConfig extends ServiceMap.Service<
       readonly userAgent: string;
     }> = {},
   ) {
-    return Layer.succeed(TwitterConfig, makeConfig(overrides));
+    return Layer.succeed(
+      TwitterConfig,
+      makeConfig({
+        ...overrides,
+        pagination: { jitterMs: 0, ...overrides.pagination },
+      }),
+    );
   }
 }
