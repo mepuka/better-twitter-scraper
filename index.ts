@@ -7,7 +7,6 @@ export type { TwitterConfigShape } from "./src/config";
 export { TwitterDirectMessages } from "./src/direct-messages";
 export { DmConversation, DmConversationPage, DmInbox, DmMessage } from "./src/dm-models";
 export { TwitterEndpointDiscovery } from "./src/endpoint-discovery";
-export { updateQueryIds, getQueryIds } from "./src/endpoints";
 export {
   AuthenticationError,
   BotDetectionError,

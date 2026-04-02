@@ -27,8 +27,22 @@ interface EndpointTemplate {
 }
 
 // ---------------------------------------------------------------------------
-// Mutable query-ID map — initialized with hardcoded fallbacks, updatable at
-// runtime via `updateQueryIds()` after endpoint auto-discovery.
+// Module-level mutable query-ID map
+//
+// This Map is initialized with hardcoded fallback IDs and mutated exactly once
+// during layer construction (in strategy.ts / pooled-strategy.ts) via
+// `updateQueryIds()` after endpoint auto-discovery.
+//
+// Why module-level state instead of a Ref-based service?
+// Every service file (tweets.ts, public.ts, etc.) imports `endpointRegistry`
+// at the module level, and the registry methods close over `graphqlBaseUrl`
+// which reads this map. Threading a Ref through every service would be a
+// large refactor with minimal safety gain — the mutation window is tiny
+// (single synchronous call during init), and discovered IDs are globally
+// correct across runtimes.
+//
+// `updateQueryIds` and `getQueryIds` are intentionally NOT re-exported from
+// the public API (index.ts) to prevent consumers from mutating the map.
 // ---------------------------------------------------------------------------
 
 const queryIds = new Map<string, string>([
@@ -48,8 +62,12 @@ const queryIds = new Map<string, string>([
 
 /**
  * Replace active query IDs with freshly discovered values.
+ *
  * Only updates entries whose operation name already exists in the map
  * so that we don't accidentally add unknown endpoints.
+ *
+ * **Internal only** — not re-exported from the public API. Called exactly once
+ * during layer construction in `strategy.ts` / `pooled-strategy.ts`.
  */
 export const updateQueryIds = (discovered: ReadonlyMap<string, string>) => {
   for (const [name, id] of discovered) {
@@ -59,9 +77,14 @@ export const updateQueryIds = (discovered: ReadonlyMap<string, string>) => {
   }
 };
 
-/** Read-only snapshot of the current query-ID map (useful for testing/logging). */
+/**
+ * Read-only snapshot of the current query-ID map (useful for testing/logging).
+ *
+ * **Internal only** — not re-exported from the public API.
+ */
 export const getQueryIds = (): ReadonlyMap<string, string> => new Map(queryIds);
 
+/** Builds the base GraphQL URL by looking up the query ID from the module-level map. */
 const graphqlBaseUrl = (operationName: string) =>
   `https://api.x.com/graphql/${queryIds.get(operationName)}/${operationName}`;
 
