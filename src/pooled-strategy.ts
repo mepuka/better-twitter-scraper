@@ -48,7 +48,8 @@ export class SessionPoolManager extends ServiceMap.Service<
 // the ScraperStrategy and SessionPoolManager interfaces.
 // ---------------------------------------------------------------------------
 
-interface PooledInternals {
+/** @internal */
+export interface PooledInternals {
   readonly strategy: {
     readonly execute: <A>(
       request: import("./request").ApiRequest<A>,

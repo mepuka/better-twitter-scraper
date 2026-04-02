@@ -60,5 +60,7 @@ export {
   getRetweetedTweet,
   getSelfThread,
 } from "./src/tweet-detail-projections";
+export { TwitterScraper } from "./src/scraper";
+export type { ScraperOptions } from "./src/scraper";
 export { TwitterTweets } from "./src/tweets";
 export { UserAuth } from "./src/user-auth";
