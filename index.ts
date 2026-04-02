@@ -1,11 +1,24 @@
 export { PooledScraperStrategy, SessionPoolManager } from "./src/pooled-strategy";
 export type { SessionSnapshot } from "./src/pooled-strategy";
 export { CookieManager } from "./src/cookies";
+export type { SerializedCookie } from "./src/cookies";
 export { TwitterConfig } from "./src/config";
+export type { TwitterConfigShape } from "./src/config";
 export { TwitterDirectMessages } from "./src/direct-messages";
 export { DmConversation, DmConversationPage, DmInbox, DmMessage } from "./src/dm-models";
 export { TwitterEndpointDiscovery } from "./src/endpoint-discovery";
 export { updateQueryIds, getQueryIds } from "./src/endpoints";
+export {
+  AuthenticationError,
+  BotDetectionError,
+  GuestTokenError,
+  HttpStatusError,
+  InvalidResponseError,
+  ProfileNotFoundError,
+  RateLimitError,
+  TransportError,
+  TweetNotFoundError,
+} from "./src/errors";
 export { GuestAuth } from "./src/guest-auth";
 export { TwitterHttpClient } from "./src/http";
 export type { HttpScript, ScriptedHttpResponse } from "./src/http";

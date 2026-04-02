@@ -1,27 +1,66 @@
 {
-  "name": "better_twitter_scraper",
-  "module": "index.ts",
+  "name": "@pooks/twitter-scraper",
+  "version": "0.1.0",
+  "description": "Effect-native Twitter/X scraper with session pooling, TLS fingerprinting, and endpoint auto-discovery",
   "type": "module",
-  "private": true,
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "index.ts",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build index.ts --outdir dist --target node --format esm --external effect --external cycletls --external linkedom --external x-client-transaction-id",
+    "build:types": "tsc -p tsconfig.build.json",
+    "cookies:extract": "bun scripts/extract-twitter-cookies.ts",
+    "prepare": "effect-language-service patch",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "RUN_LIVE_TWITTER_SMOKE=1 RUN_LIVE_TWITTER_AUTH_SMOKE=1 vitest run tests/live-smoke.test.ts"
+  },
+  "peerDependencies": {
+    "effect": ">=4.0.0-beta.35"
+  },
+  "dependencies": {
+    "cycletls": "^2.0.5",
+    "linkedom": "^0.18.12",
+    "x-client-transaction-id": "^0.2.0"
+  },
   "devDependencies": {
     "@effect/language-service": "^0.80.0",
     "@effect/vitest": "4.0.0-beta.35",
     "@types/bun": "latest",
+    "effect": "^4.0.0-beta.35",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   },
-  "scripts": {
-    "cookies:extract": "bun scripts/extract-twitter-cookies.ts",
-    "smoke:auth-live": "bun scripts/live-auth-smoke.ts",
-    "prepare": "effect-language-service patch",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "cycletls": "^2.0.5",
-    "effect": "^4.0.0-beta.35",
-    "linkedom": "^0.18.12",
-    "x-client-transaction-id": "^0.2.0"
+  "keywords": [
+    "twitter",
+    "x",
+    "scraper",
+    "effect",
+    "effect-ts",
+    "api",
+    "tweets",
+    "timeline"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mepuka/better-twitter-scraper"
   }
 }
