@@ -13,14 +13,7 @@ export interface BucketState {
 
 const FALLBACK_RETRY_DELAY = Duration.seconds(1);
 
-const parseHeaderNumber = (value: string | undefined) => {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
-};
+import { parseHeaderNumber } from "./parse-utils";
 
 const blockedUntilFromState = (state: BucketState) =>
   state.remaining === 0 && state.reset !== undefined

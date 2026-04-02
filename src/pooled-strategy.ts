@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Ref, ServiceMap } from "effect";
+import { Clock, Effect, Layer, Option, Ref, ServiceMap } from "effect";
 
 import { TwitterConfig } from "./config";
 import type { SerializedCookie } from "./cookies";
@@ -86,8 +86,8 @@ const sortByRateLimitState = (
       ),
     );
 
-    const nowEpochSec = Math.floor(Date.now() / 1000);
-    const nowMs = Date.now();
+    const nowMs = yield* Clock.currentTimeMillis;
+    const nowEpochSec = Math.floor(nowMs / 1000);
 
     const isAvailable = (s: BucketState) => {
       // A session is blocked if blockedUntil is in the future

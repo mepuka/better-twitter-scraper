@@ -6,7 +6,7 @@ import type {
 } from "./api-types";
 import { InvalidResponseError, ProfileNotFoundError, TweetNotFoundError } from "./errors";
 import { Mention, Profile, Tweet, type TimelinePage } from "./models";
-import { parseMediaGroups, parseTimestamp, reconstructTweetHtml } from "./parse-utils";
+import { getInstructionEntries, parseMediaGroups, parseTimestamp, reconstructTweetHtml } from "./parse-utils";
 import type { TweetDetailDocument } from "./tweet-detail-model";
 import { buildTweetDetailDocument } from "./tweet-detail-builder";
 
@@ -472,13 +472,6 @@ export const parseFollowingPageResponse = (
   });
 };
 
-const getInstructionEntries = <TEntry>(instruction: {
-  readonly entries?: ReadonlyArray<TEntry>;
-  readonly entry?: TEntry;
-}) => [
-  ...(instruction.entries ?? []),
-  ...(instruction.entry ? [instruction.entry] : []),
-];
 
 const parseSearchProfile = (
   itemContent: SearchEntryItemContentRaw,

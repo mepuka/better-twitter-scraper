@@ -37,23 +37,6 @@ export const requestLogAnnotations = (
   retry_attempt: options.retryAttempt,
 });
 
-export const annotateRequestLogs =
-  (
-    request: Pick<
-      ApiRequest<unknown>,
-      | "authRequirement"
-      | "bearerToken"
-      | "endpointId"
-      | "family"
-      | "rateLimitBucket"
-    >,
-    options: {
-      readonly retryAttempt: number;
-      readonly transport: TransportName;
-    },
-  ) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    Effect.annotateLogs(effect, requestLogAnnotations(request, options));
 
 export const transportLogAnnotations = (transport: TransportName) => ({
   transport,

@@ -5,6 +5,31 @@ import type {
 import { TweetPhoto, TweetVideo } from "./tweet-detail-model";
 
 // ---------------------------------------------------------------------------
+// Shared numeric parsing
+// ---------------------------------------------------------------------------
+
+export const parseHeaderNumber = (value: string | undefined) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+// ---------------------------------------------------------------------------
+// Shared timeline helpers
+// ---------------------------------------------------------------------------
+
+export const getInstructionEntries = <TEntry>(instruction: {
+  readonly entries?: ReadonlyArray<TEntry>;
+  readonly entry?: TEntry;
+}) => [
+  ...(instruction.entries ?? []),
+  ...(instruction.entry ? [instruction.entry] : []),
+];
+
+// ---------------------------------------------------------------------------
 // Regex constants used by reconstructTweetHtml
 // ---------------------------------------------------------------------------
 

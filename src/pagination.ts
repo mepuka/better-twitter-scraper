@@ -1,4 +1,4 @@
-import { Effect, Option, Stream } from "effect";
+import { Effect, Option, Random, Stream } from "effect";
 import type { TimelinePage } from "./models";
 
 interface PaginationState {
@@ -28,7 +28,8 @@ export const paginateTimeline = <T, E>(options: {
 
       return Effect.gen(function* () {
         if (state.cursor !== undefined && options.jitterMs && options.jitterMs > 0) {
-          yield* Effect.sleep(`${Math.floor(Math.random() * options.jitterMs)} millis`);
+          const jitter = yield* Random.nextIntBetween(0, options.jitterMs);
+          yield* Effect.sleep(`${jitter} millis`);
         }
         const page = yield* options.fetchPage(state.cursor, state.remaining);
         const items = page.items.slice(0, state.remaining);

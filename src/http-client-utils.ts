@@ -10,16 +10,8 @@ import {
   RateLimitError,
   TweetNotFoundError,
 } from "./errors";
+import { parseHeaderNumber } from "./parse-utils";
 import type { ApiRequest } from "./request";
-
-const parseHeaderNumber = (value: string | undefined) => {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
-};
 
 export const classifyHttpStatusError = <A>(
   request: ApiRequest<A>,

@@ -1,4 +1,4 @@
-import { Effect, Layer, ServiceMap } from "effect";
+import { Clock, Effect, Layer, ServiceMap } from "effect";
 
 import { CHROME_USER_AGENT } from "./chrome-fingerprint";
 import { CookieManager } from "./cookies";
@@ -15,25 +15,26 @@ import {
 const XPFF_BASE_KEY =
   "0e6be1f1e21ffc33590b888fd4dc81b19713e570e805d4e5df80a493c9571a05";
 
-const xpffPlaintext = () =>
+const xpffPlaintext = (nowMs: number) =>
   JSON.stringify({
     navigator_properties: {
       hasBeenActive: "true",
       userAgent: CHROME_USER_AGENT,
       webdriver: "false",
     },
-    created_at: Date.now(),
+    created_at: nowMs,
   });
 
 const generateXpffHeader = (guestId: string) =>
   Effect.gen(function* () {
+    const nowMs = yield* Clock.currentTimeMillis;
     const key = yield* sha256(utf8Bytes(`${XPFF_BASE_KEY}${guestId}`));
     const nonce = yield* randomBytes(12);
     const cipher = yield* importAesGcmKey(key, ["encrypt"]);
     const encrypted = yield* encryptAesGcm({
       key: cipher,
       iv: nonce,
-      plaintext: utf8Bytes(xpffPlaintext()),
+      plaintext: utf8Bytes(xpffPlaintext(nowMs)),
     });
 
     const combined = new Uint8Array(nonce.length + encrypted.length);

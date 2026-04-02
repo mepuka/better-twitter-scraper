@@ -6,7 +6,7 @@ import type {
   TimelineResultRaw,
 } from "./api-types";
 import { InvalidResponseError, TweetNotFoundError } from "./errors";
-import { parseMediaGroups, parseTimestamp, reconstructTweetHtml } from "./parse-utils";
+import { getInstructionEntries, parseMediaGroups, parseTimestamp, reconstructTweetHtml } from "./parse-utils";
 import {
   TweetDetailDocument,
   TweetDetailNode,
@@ -441,10 +441,6 @@ const collectTweetObservations = (
   }
 };
 
-const getInstructionEntries = (instruction: TimelineInstructionRaw) => [
-  ...(instruction.entries ?? []),
-  ...(instruction.entry ? [instruction.entry] : []),
-];
 
 export const buildTweetDetailDocument = (
   body: unknown,

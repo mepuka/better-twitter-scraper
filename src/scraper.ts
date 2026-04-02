@@ -1,4 +1,4 @@
-import { Layer } from "effect";
+import { Duration, Layer } from "effect";
 
 import type { SerializedCookie } from "./cookies";
 import { CookieManager } from "./cookies";
@@ -83,6 +83,9 @@ export class TwitterScraper {
    */
   static guestLayer(options?: ScraperOptions) {
     const configLayer = TwitterConfig.testLayer({
+      ...(options?.config?.requestTimeoutMs !== undefined
+        ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
+        : {}),
       ...(options?.config?.retryLimit !== undefined
         ? { strategy: { retryLimit: options.config.retryLimit } }
         : {}),
@@ -125,6 +128,9 @@ export class TwitterScraper {
    */
   static authenticatedLayer(options?: ScraperOptions) {
     const configLayer = TwitterConfig.testLayer({
+      ...(options?.config?.requestTimeoutMs !== undefined
+        ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
+        : {}),
       ...(options?.config?.retryLimit !== undefined
         ? { strategy: { retryLimit: options.config.retryLimit } }
         : {}),
@@ -206,6 +212,9 @@ export class TwitterScraper {
     options?: ScraperOptions,
   ) {
     const configLayer = TwitterConfig.testLayer({
+      ...(options?.config?.requestTimeoutMs !== undefined
+        ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
+        : {}),
       ...(options?.config?.retryLimit !== undefined
         ? { strategy: { retryLimit: options.config.retryLimit } }
         : {}),
