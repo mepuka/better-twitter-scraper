@@ -241,6 +241,7 @@ export class PooledScraperStrategy {
             capsule!.rateLimiter,
             transport.name,
             config.strategy.retryLimit,
+            config.requestTimeout,
           );
 
           return run(request).pipe(

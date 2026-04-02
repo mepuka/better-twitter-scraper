@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, ServiceMap } from "effect";
+import { Duration, Effect, Layer, Option, Schedule, ServiceMap } from "effect";
 
 import type * as Cookies from "effect/unstable/http/Cookies";
 
@@ -97,6 +97,7 @@ export const createStrategyExecute = (
   rateLimiter: StrategyRateLimiter,
   transport: TransportName,
   retryLimit = 1,
+  requestTimeout: Duration.Duration = Duration.millis(30_000),
 ) => {
   const resolveRequestAuth = (
     request: ApiRequest<unknown>,
@@ -128,7 +129,21 @@ export const createStrategyExecute = (
       const requestAuth = yield* resolveRequestAuth(request);
       yield* rateLimiter.awaitReady(request.rateLimitBucket);
       const headers = yield* requestAuth.headersFor(request);
-      const response = yield* http.execute(prepareApiRequest(request, headers));
+      const response = yield* http.execute(prepareApiRequest(request, headers)).pipe(
+        Effect.timeoutOrElse({
+          duration: requestTimeout,
+          onTimeout: () => Effect.fail(new TransportError({
+            url: request.url,
+            reason: `Request to ${request.endpointId} timed out after ${Duration.toMillis(requestTimeout)}ms`,
+            error: new Error("timeout"),
+          })),
+        }),
+        Effect.retry({
+          while: (error) => error._tag === "TransportError",
+          times: 2,
+          schedule: Schedule.exponential("500 millis").pipe(Schedule.jittered),
+        }),
+      );
 
       yield* cookies.applySetCookies(response.cookies);
 
@@ -264,6 +279,7 @@ export class ScraperStrategy extends ServiceMap.Service<
             rateLimiter,
             transport.name,
             config.strategy.retryLimit,
+            config.requestTimeout,
           ),
         };
       }),
