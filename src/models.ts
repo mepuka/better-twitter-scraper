@@ -75,6 +75,8 @@ export class Tweet extends Schema.Class<Tweet>("Tweet")({
   quotedTweetId: Schema.optionalKey(Schema.String),
   inReplyToTweetId: Schema.optionalKey(Schema.String),
   retweetedTweetId: Schema.optionalKey(Schema.String),
+  quotedTweet: Schema.optionalKey(Schema.suspend((): Schema.Schema<Tweet> => Tweet)),
+  retweetedTweet: Schema.optionalKey(Schema.suspend((): Schema.Schema<Tweet> => Tweet)),
   place: Schema.optionalKey(TweetPlace),
 }) {}
 

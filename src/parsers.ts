@@ -319,6 +319,22 @@ const parseTweet = (
     ...(legacy.retweeted_status_id_str
       ? { retweetedTweetId: legacy.retweeted_status_id_str }
       : {}),
+    ...(result?.quoted_status_result?.result
+      ? {
+          quotedTweet: parseTweet(
+            { tweet_results: { result: result.quoted_status_result.result } },
+            `quoted-${id}`,
+          ),
+        }
+      : {}),
+    ...(legacy.retweeted_status_result?.result
+      ? {
+          retweetedTweet: parseTweet(
+            { tweet_results: { result: legacy.retweeted_status_result.result } },
+            `retweet-${id}`,
+          ),
+        }
+      : {}),
   });
 };
 

@@ -78,9 +78,14 @@ const tweetResult = (tweet: {
     readonly tcoUrl: string;
   }>;
   readonly views?: string;
+  readonly quotedResult?: any;
+  readonly retweetedResult?: any;
 }) => ({
   __typename: "Tweet",
   rest_id: tweet.id,
+  quoted_status_result: tweet.quotedResult
+    ? { result: tweet.quotedResult }
+    : undefined,
   legacy: {
     id_str: tweet.id,
     full_text: tweet.text,
@@ -90,6 +95,11 @@ const tweetResult = (tweet: {
     favorite_count: 5,
     reply_count: 1,
     retweet_count: 2,
+    quoted_status_id_str: tweet.quotedResult?.rest_id,
+    retweeted_status_id_str: tweet.retweetedResult?.rest_id,
+    retweeted_status_result: tweet.retweetedResult
+      ? { result: tweet.retweetedResult }
+      : undefined,
     entities: {
       hashtags: (tweet.hashtags ?? []).map((value) => ({ text: value })),
       urls: (tweet.urls ?? []).map((value) => ({
@@ -225,6 +235,14 @@ export const tweetsPageOneFixture = {
                         name: "Friendly User",
                       },
                     ],
+                    quotedResult: tweetResult({
+                      id: "quoted-in-tweet-2",
+                      text: "This is the quoted tweet",
+                      username: "quoted_author",
+                      name: "Quoted Author",
+                      userId: "9999",
+                      createdAt: "Mon Jan 18 08:00:00 +0000 2010",
+                    }),
                   }),
                   {
                     entryId: "cursor-bottom-1",

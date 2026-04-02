@@ -177,6 +177,16 @@ describe("Slice 1 public reads", () => {
           name: "Friendly User",
         },
       ]);
+      // Second tweet has an embedded quoted tweet
+      expect(tweets[1]?.isQuoted).toBe(true);
+      expect(tweets[1]?.quotedTweetId).toBe("quoted-in-tweet-2");
+      expect(tweets[1]?.quotedTweet).toBeDefined();
+      expect(tweets[1]?.quotedTweet?.id).toBe("quoted-in-tweet-2");
+      expect(tweets[1]?.quotedTweet?.text).toBe("This is the quoted tweet");
+      expect(tweets[1]?.quotedTweet?.username).toBe("quoted_author");
+      // First tweet has no embedded tweets
+      expect(tweets[0]?.quotedTweet).toBeUndefined();
+      expect(tweets[0]?.retweetedTweet).toBeUndefined();
     }).pipe(
       Effect.provide(
         publicTestLayer({
