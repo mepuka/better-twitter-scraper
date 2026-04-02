@@ -38,7 +38,7 @@ describe("TwitterConfig", () => {
       expect(config.search.maxPageSize).toBe(10);
     }).pipe(
       Effect.provide(
-        TwitterConfig.testLayer({
+        TwitterConfig.defaultLayer({
           proxyUrl: "http://localhost:9999",
           timeline: {
             defaultLimit: 5,

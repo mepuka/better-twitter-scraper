@@ -62,7 +62,7 @@ const extractError = <A>(
 // ---------------------------------------------------------------------------
 
 const baseDeps = Layer.mergeAll(
-  TwitterConfig.testLayer({ strategy: { retryLimit: 0 } }),
+  TwitterConfig.defaultLayer({ strategy: { retryLimit: 0 } }),
   TwitterTransactionId.testLayer(),
   transportMetadataLayer("scripted"),
 );

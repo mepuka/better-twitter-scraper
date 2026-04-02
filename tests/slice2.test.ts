@@ -79,7 +79,7 @@ const userAuthTestLayer = (
 ) =>
   UserAuth.testLayer(options).pipe(
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const searchTestLayer = (
@@ -91,7 +91,7 @@ const searchTestLayer = (
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const relationshipsTestLayer = (
@@ -103,7 +103,7 @@ const relationshipsTestLayer = (
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const mixedRuntimeTestLayer = (
@@ -120,7 +120,7 @@ const mixedRuntimeTestLayer = (
     Layer.provideMerge(UserAuth.testLayer(userAuthOptions)),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const mixedRelationshipsTestLayer = (
@@ -137,7 +137,7 @@ const mixedRelationshipsTestLayer = (
     Layer.provideMerge(UserAuth.testLayer(userAuthOptions)),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 describe("Slice 2 authenticated session", () => {

@@ -46,7 +46,7 @@ const makeCapsule = (
     return yield* createSessionCapsule(id, cookies, stubShared(config));
   });
 
-const testConfigLayer = TwitterConfig.testLayer();
+const testConfigLayer = TwitterConfig.defaultLayer();
 
 // ---------------------------------------------------------------------------
 // Tests

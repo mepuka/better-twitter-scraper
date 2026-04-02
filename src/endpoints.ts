@@ -323,9 +323,11 @@ const searchCount = (count: number) => Math.min(count, 50);
 const tweetsAndRepliesCount = (count: number) => Math.min(count, 40);
 const likedTweetsCount = (count: number) => Math.min(count, 200);
 
-const buildTrendsUrl = () => {
-  const params = new URLSearchParams();
+// ---------------------------------------------------------------------------
+// Common V1 API params shared by trends and DM endpoints
+// ---------------------------------------------------------------------------
 
+const addCommonV1Params = (params: URLSearchParams) => {
   params.set("include_profile_interstitial_type", "1");
   params.set("include_blocking", "1");
   params.set("include_blocked_by", "1");
@@ -356,6 +358,12 @@ const buildTrendsUrl = () => {
   params.set("send_error_codes", "true");
   params.set("simple_quoted_tweet", "true");
   params.set("include_tweet_replies", "false");
+};
+
+const buildTrendsUrl = () => {
+  const params = new URLSearchParams();
+  addCommonV1Params(params);
+
   params.set("count", "20");
   params.set("candidate_source", "trends");
   params.set("include_page_configuration", "false");
@@ -369,36 +377,7 @@ const buildTrendsUrl = () => {
 // ---------------------------------------------------------------------------
 
 const addDmBaseParams = (params: URLSearchParams) => {
-  params.set("include_profile_interstitial_type", "1");
-  params.set("include_blocking", "1");
-  params.set("include_blocked_by", "1");
-  params.set("include_followed_by", "1");
-  params.set("include_want_retweets", "1");
-  params.set("include_mute_edge", "1");
-  params.set("include_can_dm", "1");
-  params.set("include_can_media_tag", "1");
-  params.set("include_ext_has_nft_avatar", "1");
-  params.set("include_ext_is_blue_verified", "1");
-  params.set("include_ext_verified_type", "1");
-  params.set("skip_status", "1");
-  params.set("cards_platform", "Web-12");
-  params.set("include_cards", "1");
-  params.set("include_ext_alt_text", "true");
-  params.set("include_ext_limited_action_results", "false");
-  params.set("include_quote_count", "true");
-  params.set("include_reply_count", "1");
-  params.set("tweet_mode", "extended");
-  params.set("include_ext_collab_control", "true");
-  params.set("include_ext_views", "true");
-  params.set("include_entities", "true");
-  params.set("include_user_entities", "true");
-  params.set("include_ext_media_color", "true");
-  params.set("include_ext_media_availability", "true");
-  params.set("include_ext_sensitive_media_warning", "true");
-  params.set("include_ext_trusted_friends_metadata", "true");
-  params.set("send_error_codes", "true");
-  params.set("simple_quoted_tweet", "true");
-  params.set("include_tweet_replies", "false");
+  addCommonV1Params(params);
 };
 
 const buildDmInboxUrl = () => {

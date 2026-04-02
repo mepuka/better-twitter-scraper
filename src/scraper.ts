@@ -82,7 +82,7 @@ export class TwitterScraper {
    * Uses CycleTLS with Chrome TLS fingerprinting.
    */
   static guestLayer(options?: ScraperOptions) {
-    const configLayer = TwitterConfig.testLayer({
+    const configLayer = TwitterConfig.defaultLayer({
       ...(options?.config?.requestTimeoutMs !== undefined
         ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
         : {}),
@@ -127,7 +127,7 @@ export class TwitterScraper {
    * ```
    */
   static authenticatedLayer(options?: ScraperOptions) {
-    const configLayer = TwitterConfig.testLayer({
+    const configLayer = TwitterConfig.defaultLayer({
       ...(options?.config?.requestTimeoutMs !== undefined
         ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
         : {}),
@@ -211,7 +211,7 @@ export class TwitterScraper {
     initialSessions: ReadonlyArray<ReadonlyArray<SerializedCookie>> = [],
     options?: ScraperOptions,
   ) {
-    const configLayer = TwitterConfig.testLayer({
+    const configLayer = TwitterConfig.defaultLayer({
       ...(options?.config?.requestTimeoutMs !== undefined
         ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
         : {}),

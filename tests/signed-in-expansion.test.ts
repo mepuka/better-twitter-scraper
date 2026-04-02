@@ -53,7 +53,7 @@ const searchTestLayer = (
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const tweetsTestLayer = (
@@ -65,7 +65,7 @@ const tweetsTestLayer = (
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const trendsTestLayer = (
@@ -77,7 +77,7 @@ const trendsTestLayer = (
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const mixedExpansionLayer = (
@@ -95,7 +95,7 @@ const mixedExpansionLayer = (
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 describe("Signed-in expansion request registry", () => {

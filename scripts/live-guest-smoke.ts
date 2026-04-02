@@ -15,7 +15,7 @@ const livePublicLayer = TwitterPublic.layer.pipe(
   Layer.provideMerge(GuestAuth.liveLayer),
   Layer.provideMerge(CookieManager.liveLayer),
   Layer.provideMerge(TwitterHttpClient.cycleTlsLayer()),
-  Layer.provideMerge(TwitterConfig.testLayer()),
+  Layer.provideMerge(TwitterConfig.defaultLayer()),
 );
 
 const main = async () => {

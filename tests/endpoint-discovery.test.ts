@@ -166,7 +166,7 @@ describe("TwitterEndpointDiscovery service", () => {
   const discoveryTestLayer = (script: HttpScript) =>
     TwitterEndpointDiscovery.liveLayer.pipe(
       Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-      Layer.provideMerge(TwitterConfig.testLayer()),
+      Layer.provideMerge(TwitterConfig.defaultLayer()),
     );
 
   it.effect("discovers query IDs from scripted x.com and JS bundles", () =>

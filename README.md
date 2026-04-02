@@ -280,7 +280,7 @@ const layer = Layer.mergeAll(
   Layer.provideMerge(CookieManager.liveLayer),
   Layer.provideMerge(TwitterEndpointDiscovery.liveLayer),
   Layer.provideMerge(TwitterHttpClient.cycleTlsLayer()),
-  Layer.provideMerge(TwitterConfig.testLayer()),
+  Layer.provideMerge(TwitterConfig.defaultLayer()),
 );
 ```
 

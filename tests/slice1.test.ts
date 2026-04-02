@@ -27,7 +27,7 @@ const publicTestLayer = (script: HttpScript) =>
     Layer.provideMerge(GuestAuth.liveLayer),
     Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const strategyTestLayer = (script: HttpScript) =>
@@ -35,7 +35,7 @@ const strategyTestLayer = (script: HttpScript) =>
     Layer.provideMerge(GuestAuth.liveLayer),
     Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.testLayer()),
+    Layer.provideMerge(TwitterConfig.defaultLayer()),
   );
 
 const guestActivateKey = httpRequestKey({

@@ -180,7 +180,7 @@ const UserScraperTest = TwitterSearch.layer.pipe(
   Layer.provideMerge(UserAuth.testLayer()),
   Layer.provideMerge(CookieManager.testLayer()),
   Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-  Layer.provideMerge(TwitterConfig.testLayer()),
+  Layer.provideMerge(TwitterConfig.defaultLayer()),
 )
 ```
 
@@ -401,7 +401,7 @@ interface TwitterConfig {
 }
 ```
 
-Loaded from environment via `Effect.Config`. Sensitive values use `Config.redacted`, and tests use `TwitterConfig.testLayer()` so they never depend on process env.
+Loaded from environment via `Effect.Config`. Sensitive values use `Config.redacted`, and tests use `TwitterConfig.defaultLayer()` so they never depend on process env.
 
 ---
 

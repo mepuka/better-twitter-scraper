@@ -163,7 +163,7 @@ export class TwitterConfig extends ServiceMap.Service<
     );
   }
 
-  static testLayer(
+  static defaultLayer(
     overrides: Partial<{
       readonly bearerTokens: Partial<TwitterConfigShape["bearerTokens"]>;
       readonly guestTokenTtl: Duration.Duration;
