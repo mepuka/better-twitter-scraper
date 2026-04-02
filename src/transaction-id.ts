@@ -1,4 +1,5 @@
-import { Effect, Layer, Option, Ref, ServiceMap } from "effect";
+import { Clock, Effect, Layer, Option, Ref, ServiceMap } from "effect";
+import { SignedInSessionRevision } from "./signed-in-session-revision";
 
 import ClientTransaction from "x-client-transaction-id";
 import { parseHTML } from "linkedom";
@@ -115,10 +116,12 @@ export class TwitterTransactionId extends ServiceMap.Service<
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
       const http = yield* TwitterHttpClient;
+      const sessionRevision = yield* SignedInSessionRevision;
       const cacheRef = yield* Ref.make(
         Option.none<{
           readonly document: TransactionDocument;
           readonly cachedAt: number;
+          readonly revision: number;
         }>(),
       );
 
@@ -209,11 +212,13 @@ export class TwitterTransactionId extends ServiceMap.Service<
 
       const cachedDocument = Effect.fn("TwitterTransactionId.cachedDocument")(function* () {
         const existing = yield* Ref.get(cacheRef);
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
+        const currentRevision = yield* sessionRevision.current;
 
         if (
           Option.isSome(existing) &&
-          now - existing.value.cachedAt < DOCUMENT_CACHE_TTL_MS
+          now - existing.value.cachedAt < DOCUMENT_CACHE_TTL_MS &&
+          existing.value.revision === currentRevision
         ) {
           return existing.value.document;
         }
@@ -224,6 +229,7 @@ export class TwitterTransactionId extends ServiceMap.Service<
           Option.some({
             document,
             cachedAt: now,
+            revision: currentRevision,
           }),
         );
         return document;

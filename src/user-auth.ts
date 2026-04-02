@@ -5,6 +5,7 @@ import { TwitterConfig, type TwitterConfigShape } from "./config";
 import { AuthenticationError } from "./errors";
 import { buildBaseHeaders } from "./header-policy";
 import { type RequestAuthHelper, UserRequestAuth } from "./request-auth";
+import { SignedInSessionRevision } from "./signed-in-session-revision";
 import { TwitterTransactionId } from "./transaction-id";
 import { TwitterXpff, type XpffInstance } from "./xpff";
 
@@ -19,9 +20,12 @@ export type UserAuthInstance = {
 
 export const createUserAuthInstance = (deps: {
   readonly cookies: CookieStoreInstance;
+  readonly sessionRevision?: {
+    readonly bump: Effect.Effect<void>;
+  };
 }) =>
   Effect.gen(function* () {
-    const { cookies } = deps;
+    const { cookies, sessionRevision } = deps;
 
     const isLoggedIn = Effect.fn("UserAuth.isLoggedIn")(function* () {
       const csrfToken = yield* cookies.get("ct0");
@@ -34,6 +38,9 @@ export const createUserAuthInstance = (deps: {
     ) {
       yield* cookies.clear;
       yield* cookies.restoreSerializedCookies(serializedCookies);
+      if (sessionRevision) {
+        yield* sessionRevision.bump;
+      }
     });
 
     return {
@@ -98,7 +105,8 @@ const makeBaseUserAuthLayer = () =>
     UserAuth,
     Effect.gen(function* () {
       const cookies = yield* CookieManager;
-      return yield* createUserAuthInstance({ cookies });
+      const sessionRevision = yield* SignedInSessionRevision;
+      return yield* createUserAuthInstance({ cookies, sessionRevision });
     }),
   );
 
@@ -130,6 +138,7 @@ export class UserAuth extends ServiceMap.Service<
     return Layer.mergeAll(baseLayer, makeUserRequestAuthLayer()).pipe(
       Layer.provideMerge(TwitterXpff.liveLayer),
       Layer.provideMerge(TwitterTransactionId.liveLayer),
+      Layer.provide(SignedInSessionRevision.liveLayer),
     );
   }
 
@@ -142,6 +151,7 @@ export class UserAuth extends ServiceMap.Service<
     return Layer.mergeAll(baseLayer, makeUserRequestAuthLayer()).pipe(
       Layer.provideMerge(TwitterXpff.testLayer(options.xpff)),
       Layer.provideMerge(TwitterTransactionId.testLayer(options.transactionId)),
+      Layer.provide(SignedInSessionRevision.testLayer()),
     );
   }
 }
