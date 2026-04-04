@@ -16,6 +16,8 @@ import {
   parseTweetsAndRepliesPageResponse,
   parseTimelinePageResponse,
   parseLikedTweetsPageResponse,
+  parseBookmarksPageResponse,
+  parseBookmarkMutationResponse,
 } from "./parsers";
 import type { ApiRequest } from "./request";
 import type { TweetDetailDocument } from "./tweet-detail-model";
@@ -58,6 +60,13 @@ const queryIds = new Map<string, string>([
   ["HomeTimeline", "HJFjzBgCs16TqxewQOeLNg"],
   ["TweetResultByRestId", "4PdbzTmQ5PTjz9RiureISQ"],
   ["CommunityTweetsTimeline", "BnowIPH1W7RDwY3EkUgneg"],
+  ["Bookmarks", "RV1g3b8n_SGOHwkqKYSCFw"],
+  // Defensive alias: if X renames the bookmarks operation back to
+  // BookmarkSearchTimeline, discovery will capture the new ID here.
+  // The bookmarks endpoint always uses the "Bookmarks" key; see
+  // syncBookmarkQueryId() below.
+  ["BookmarkSearchTimeline", "RV1g3b8n_SGOHwkqKYSCFw"],
+  ["DeleteBookmark", "Wlmlj2-xzyS1GN3a6cj-mQ"],
 ]);
 
 /**
@@ -74,6 +83,25 @@ export const updateQueryIds = (discovered: ReadonlyMap<string, string>) => {
     if (queryIds.has(name)) {
       queryIds.set(name, id);
     }
+  }
+  syncBookmarkQueryId();
+};
+
+/**
+ * Keep the "Bookmarks" key in sync with "BookmarkSearchTimeline".
+ *
+ * Discovery may find the bookmarks operation under either name depending
+ * on the current X client-web bundle. The endpoint function always looks
+ * up "Bookmarks", so if only "BookmarkSearchTimeline" was refreshed we
+ * copy its ID across.
+ */
+const syncBookmarkQueryId = () => {
+  const primary = queryIds.get("Bookmarks")!;
+  const alias = queryIds.get("BookmarkSearchTimeline")!;
+  // If the alias was updated by discovery (differs from the initial
+  // fallback), propagate it to the primary key.
+  if (alias !== primary) {
+    queryIds.set("Bookmarks", alias);
   }
 };
 
@@ -254,6 +282,19 @@ const endpointTemplates = {
       withArticlePlainText: false,
     },
   },
+  bookmarks: {
+    variables: {
+      count: 20,
+      includePromotedContent: false,
+      withDownvotePerspective: false,
+      withReactionsMetadata: false,
+      withReactionsPerspective: false,
+    },
+    features: {
+      ...authenticatedProfilesTimelineFeatures,
+      graphql_timeline_v2_bookmark_timeline: true,
+    },
+  },
   followers: {
     variables: {
       userId: "1806359170830172162",
@@ -345,6 +386,7 @@ const communityTweetsCount = (count: number) => Math.min(count, 200);
 const searchCount = (count: number) => Math.min(count, 50);
 const tweetsAndRepliesCount = (count: number) => Math.min(count, 40);
 const likedTweetsCount = (count: number) => Math.min(count, 200);
+const bookmarksCount = (count: number) => Math.min(count, 200);
 
 // ---------------------------------------------------------------------------
 // Common V1 API params shared by trends and DM endpoints
@@ -875,6 +917,50 @@ export const endpointRegistry = {
       url: buildDmConversationUrl(conversationId, maxId),
       responseKind: "json",
       decode: (body) => parseDmConversationResponse(body, conversationId),
+    };
+  },
+
+  bookmarks(
+    count: number,
+    cursor?: string,
+  ): ApiRequest<TimelinePage<Tweet>> {
+    return {
+      endpointId: "Bookmarks",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "bookmarks",
+      method: "GET",
+      url: buildUrl("Bookmarks", endpointTemplates.bookmarks, {
+        variables: {
+          ...endpointTemplates.bookmarks.variables,
+          count: bookmarksCount(count),
+          cursor,
+        },
+      }),
+      responseKind: "json",
+      decode: parseBookmarksPageResponse,
+    };
+  },
+
+  removeBookmark(tweetId: string): ApiRequest<void> {
+    return {
+      endpointId: "DeleteBookmark",
+      family: "graphql",
+      authRequirement: "user",
+      bearerToken: "secondary",
+      rateLimitBucket: "bookmarks",
+      method: "POST",
+      url: graphqlBaseUrl("DeleteBookmark"),
+      body: {
+        _tag: "json",
+        value: {
+          variables: { tweet_id: tweetId },
+          queryId: queryIds.get("DeleteBookmark"),
+        },
+      },
+      responseKind: "json",
+      decode: parseBookmarkMutationResponse,
     };
   },
 } as const;

@@ -39,6 +39,12 @@ export class TwitterTweets extends ServiceMap.Service<
     readonly getHomeTimeline: (
       options?: GetTweetsOptions,
     ) => Stream.Stream<Tweet, TweetTimelineError>;
+    readonly getBookmarks: (
+      options?: GetTweetsOptions,
+    ) => Stream.Stream<Tweet, TweetTimelineError>;
+    readonly removeBookmark: (
+      tweetId: string,
+    ) => Effect.Effect<void, StrategyError>;
   }
 >()("@better-twitter-scraper/TwitterTweets") {
   static readonly layer = Layer.effect(
@@ -135,6 +141,24 @@ export class TwitterTweets extends ServiceMap.Service<
             fetchHomeTimelinePage(remaining, cursor),
         });
 
+      const fetchBookmarksPage = Effect.fn("TwitterTweets.fetchBookmarksPage")(
+        (count: number, cursor?: string) =>
+          strategy.execute(endpointRegistry.bookmarks(count, cursor)),
+      );
+
+      const getBookmarks = (options: GetTweetsOptions = {}) =>
+        paginateTimeline({
+          remaining: options.limit ?? config.timeline.defaultLimit,
+          jitterMs: config.pagination.jitterMs,
+          fetchPage: (cursor, remaining) =>
+            fetchBookmarksPage(remaining, cursor),
+        });
+
+      const removeBookmark = Effect.fn("TwitterTweets.removeBookmark")(
+        (tweetId: string) =>
+          strategy.execute(endpointRegistry.removeBookmark(tweetId)),
+      );
+
       return {
         getTweet,
         getTweetAnonymous,
@@ -142,6 +166,8 @@ export class TwitterTweets extends ServiceMap.Service<
         getTweetsAndReplies,
         getLikedTweets,
         getHomeTimeline,
+        getBookmarks,
+        removeBookmark,
       };
     }),
   );

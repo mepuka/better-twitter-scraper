@@ -552,6 +552,7 @@ const parseTweetsTimelinePage = (
   options: {
     readonly entryPrefixes: readonly string[];
     readonly endpointId:
+      | "Bookmarks"
       | "CommunityTweets"
       | "HomeTimeline"
       | "Likes"
@@ -663,6 +664,41 @@ export const parseLikedTweetsPageResponse = (
     endpointId: "Likes",
     missingReason: "Missing liked tweets timeline instructions in Twitter response",
   });
+};
+
+export const parseBookmarksPageResponse = (
+  body: unknown,
+): TimelinePage<Tweet> => {
+  const response = body as {
+    data?: { bookmark_timeline_v2?: { timeline?: { instructions?: ReadonlyArray<TimelineInstructionRaw> } } };
+  };
+  const instructions =
+    response.data?.bookmark_timeline_v2?.timeline?.instructions;
+
+  return parseTweetsTimelinePage(instructions, {
+    entryPrefixes: ["tweet"],
+    endpointId: "Bookmarks",
+    missingReason: "Missing bookmarks timeline instructions in Twitter response",
+  });
+};
+
+export const parseBookmarkMutationResponse = (body: unknown): void => {
+  const response = body as {
+    data?: { tweet_bookmark_delete?: string };
+    errors?: ReadonlyArray<{ message: string }>;
+  };
+  if (response.errors?.length) {
+    throw new InvalidResponseError({
+      endpointId: "DeleteBookmark",
+      reason: response.errors.map((e) => e.message).join(", "),
+    });
+  }
+  if (response.data?.tweet_bookmark_delete !== "Done") {
+    throw new InvalidResponseError({
+      endpointId: "DeleteBookmark",
+      reason: "Unexpected DeleteBookmark response shape",
+    });
+  }
 };
 
 export const parseListTweetsPageResponse = (

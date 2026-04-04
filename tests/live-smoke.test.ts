@@ -556,6 +556,48 @@ describe("Live authenticated smoke", () => {
     } else {
       it.skip("loads liked tweets when a likes canary user id is configured", () => {});
     }
+
+    it("loads bookmarks with restored cookies", async () => {
+      const result = spawnSync("bun", ["scripts/live-bookmarks-smoke.ts"], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+      });
+
+      const stdout = result.stdout.trim();
+      const stderr = result.stderr.trim();
+
+      expect({
+        exitCode: result.status,
+        stderr,
+      }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+
+      const payload = JSON.parse(stdout) as {
+        readonly observability: {
+          readonly strategyCalls: ReadonlyArray<{
+            readonly authMode: string;
+            readonly endpointId: string;
+          }>;
+        };
+        readonly tweets: ReadonlyArray<{
+          readonly id?: string;
+        }>;
+      };
+
+      expect(payload.tweets.length).toBeGreaterThan(0);
+      expect(payload.tweets[0]?.id).toBeTruthy();
+      expect(payload.observability.strategyCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            endpointId: "Bookmarks",
+            authMode: "user",
+          }),
+        ]),
+      );
+    }, 30_000);
   } else {
     it.skip("restores a signed-in session from cookies", () => {});
     it.skip("searches profiles with restored cookies", () => {});
@@ -568,5 +610,6 @@ describe("Live authenticated smoke", () => {
     it.skip("loads tweets-and-replies with restored cookies", () => {});
     it.skip("loads trends with restored cookies", () => {});
     it.skip("loads liked tweets when a likes canary user id is configured", () => {});
+    it.skip("loads bookmarks with restored cookies", () => {});
   }
 });
