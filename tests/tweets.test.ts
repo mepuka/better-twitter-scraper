@@ -47,7 +47,7 @@ const tweetsTestLayer = (
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.defaultLayer()),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
 const matchingLogs = (

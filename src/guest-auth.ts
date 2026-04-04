@@ -29,7 +29,7 @@ export type GuestAuthInstance = {
     GuestTokenError | HttpStatusError | InvalidResponseError | TransportError
   >;
   readonly snapshot: Effect.Effect<{
-    readonly token: string | null;
+    readonly hasToken: boolean;
     readonly authenticatedAt: number | null;
   }>;
 };
@@ -121,7 +121,7 @@ export const createGuestAuthInstances = (deps: {
       const authenticatedAt = yield* Ref.get(authenticatedAtRef);
 
       return {
-        token: Option.isSome(token) ? token.value : null,
+        hasToken: Option.isSome(token),
         authenticatedAt: Option.isSome(authenticatedAt)
           ? authenticatedAt.value
           : null,

@@ -1,4 +1,4 @@
-import { Duration, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 
 import type { SerializedCookie } from "./cookies";
 import { CookieManager } from "./cookies";
@@ -11,7 +11,9 @@ import { TwitterLists } from "./lists";
 import { TwitterPublic } from "./public";
 import { TwitterRelationships } from "./relationships";
 import { TwitterSearch } from "./search";
+import { SignedInSessionRevision } from "./signed-in-session-revision";
 import { ScraperStrategy } from "./strategy";
+import { TwitterTransactionId } from "./transaction-id";
 import { TwitterTrends } from "./trends";
 import { TwitterTweets } from "./tweets";
 import { UserAuth } from "./user-auth";
@@ -53,6 +55,24 @@ const authenticatedServicesLayer = Layer.mergeAll(
   TwitterRelationships.layer,
   TwitterLists.layer,
   TwitterDirectMessages.layer,
+);
+
+// Trends currently depend on a single shared auth/cookie state for login
+// checks and cache keys, which does not map cleanly onto pooled sessions.
+const pooledServicesLayer = Layer.mergeAll(
+  TwitterPublic.layer,
+  TwitterSearch.layer,
+  TwitterTweets.layer,
+  TwitterRelationships.layer,
+  TwitterLists.layer,
+  TwitterDirectMessages.layer,
+);
+
+const cycleTlsLayerFromConfig = Layer.unwrap(
+  Effect.gen(function* () {
+    const config = yield* TwitterConfig;
+    return TwitterHttpClient.cycleTlsLayer(config.proxyUrl);
+  }),
 );
 
 // ---------------------------------------------------------------------------
@@ -171,7 +191,7 @@ export class TwitterScraper {
       Layer.provideMerge(UserAuth.liveLayer),
       Layer.provideMerge(CookieManager.liveLayer),
       Layer.provideMerge(TwitterEndpointDiscovery.liveLayer),
-      Layer.provideMerge(TwitterHttpClient.cycleTlsLayer()),
+      Layer.provideMerge(cycleTlsLayerFromConfig),
       Layer.provideMerge(TwitterConfig.fromEnvLayer),
     );
   }
@@ -223,11 +243,13 @@ export class TwitterScraper {
         : {}),
     });
 
-    return authenticatedServicesLayer.pipe(
+    return pooledServicesLayer.pipe(
       Layer.provideMerge(PooledScraperStrategy.layer(initialSessions)),
       Layer.provideMerge(TwitterEndpointDiscovery.liveLayer),
+      Layer.provideMerge(TwitterTransactionId.liveLayer),
       Layer.provideMerge(TwitterHttpClient.cycleTlsLayer(options?.proxyUrl)),
       Layer.provideMerge(configLayer),
+      Layer.provide(SignedInSessionRevision.liveLayer),
     );
   }
 }

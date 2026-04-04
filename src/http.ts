@@ -3,6 +3,7 @@ import initCycleTLS, { type CycleTLSClient } from "cycletls";
 import * as Cookies from "effect/unstable/http/Cookies";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpHeaders from "effect/unstable/http/Headers";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
@@ -57,6 +58,26 @@ const toSortedHeaders = (
 ): Readonly<Record<string, string>> =>
   Object.fromEntries(
     Object.entries(headers).sort(([left], [right]) => left.localeCompare(right)),
+  );
+
+const sensitiveHeaderNames = [
+  "authorization",
+  "cookie",
+  "set-cookie",
+  "x-api-key",
+  "x-csrf-token",
+  "x-guest-token",
+] as const;
+
+const toSortedRedactedHeaders = (
+  headers: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    Object.entries(
+      HttpHeaders.redact(HttpHeaders.fromInput(headers), sensitiveHeaderNames),
+    )
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => [key, typeof value === "string" ? value : String(value)]),
   );
 
 const toBodyText = (response: ScriptedHttpResponse) =>
@@ -355,7 +376,7 @@ const executePrepared = (
         endpointId: request.endpointId,
         status: response.status,
         body: body.slice(0, 500),
-        headers: toSortedHeaders(response.headers),
+        headers: toSortedRedactedHeaders(response.headers),
       });
     }
 

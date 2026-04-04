@@ -26,7 +26,7 @@ const listTestLayer = (script: HttpScript) =>
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.defaultLayer()),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
 const restoredSessionCookies = [

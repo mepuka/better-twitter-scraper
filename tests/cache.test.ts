@@ -86,7 +86,7 @@ const transactionIdLayer = (
   TwitterTransactionId.liveLayer.pipe(
     Layer.provideMerge(SignedInSessionRevision.liveLayer),
     Layer.provideMerge(countingHttpLayer(handler)),
-    Layer.provideMerge(TwitterConfig.defaultLayer()),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
 const liveUserAuthLayer = (
@@ -104,7 +104,7 @@ const liveUserAuthLayer = (
   UserAuth.liveLayer.pipe(
     Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(countingHttpLayer(handler)),
-    Layer.provideMerge(TwitterConfig.defaultLayer()),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
 const trendsLayer = (
@@ -124,7 +124,7 @@ const trendsLayer = (
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(countingHttpLayer(handler)),
-    Layer.provideMerge(TwitterConfig.defaultLayer()),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
 beforeEach(() => {

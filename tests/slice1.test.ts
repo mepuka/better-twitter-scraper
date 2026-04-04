@@ -27,7 +27,7 @@ const publicTestLayer = (script: HttpScript) =>
     Layer.provideMerge(GuestAuth.liveLayer),
     Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.defaultLayer()),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
 const strategyTestLayer = (script: HttpScript) =>
@@ -35,7 +35,7 @@ const strategyTestLayer = (script: HttpScript) =>
     Layer.provideMerge(GuestAuth.liveLayer),
     Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
-    Layer.provideMerge(TwitterConfig.defaultLayer()),
+    Layer.provideMerge(TwitterConfig.testLayer()),
   );
 
 const guestActivateKey = httpRequestKey({
@@ -217,7 +217,9 @@ describe("Slice 1 guest token handling", () => {
 
       expect(first).toBe("first");
       expect(second).toBe("second");
-      expect(snapshot.token).toBe("guest-2");
+      expect(snapshot.hasToken).toBe(true);
+      expect(snapshot.authenticatedAt).not.toBeNull();
+      expect(snapshot).not.toHaveProperty("token");
     }).pipe(
       Effect.provide(
         strategyTestLayer({

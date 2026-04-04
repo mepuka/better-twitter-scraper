@@ -179,6 +179,26 @@ export class TwitterConfig extends ServiceMap.Service<
   ) {
     return Layer.succeed(
       TwitterConfig,
+      makeConfig(overrides),
+    );
+  }
+
+  static testLayer(
+    overrides: Partial<{
+      readonly bearerTokens: Partial<TwitterConfigShape["bearerTokens"]>;
+      readonly guestTokenTtl: Duration.Duration;
+      readonly pagination: Partial<TwitterConfigShape["pagination"]>;
+      readonly proxyUrl?: string;
+      readonly requestTimeout: Duration.Duration;
+      readonly search: Partial<TwitterConfigShape["search"]>;
+      readonly strategy: Partial<TwitterConfigShape["strategy"]>;
+      readonly timeline: Partial<TwitterConfigShape["timeline"]>;
+      readonly urls: Partial<TwitterConfigShape["urls"]>;
+      readonly userAgent: string;
+    }> = {},
+  ) {
+    return Layer.succeed(
+      TwitterConfig,
       makeConfig({
         ...overrides,
         pagination: { jitterMs: 0, ...overrides.pagination },

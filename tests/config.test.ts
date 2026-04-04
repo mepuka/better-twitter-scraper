@@ -28,6 +28,14 @@ describe("TwitterConfig", () => {
     }).pipe(Effect.provide(TwitterConfig.fromEnvLayer));
   });
 
+  it.effect("keeps the production default pagination jitter enabled", () =>
+    Effect.gen(function* () {
+      const config = yield* TwitterConfig;
+
+      expect(config.pagination.jitterMs).toBe(500);
+    }).pipe(Effect.provide(TwitterConfig.defaultLayer())),
+  );
+
   it.effect("supports deterministic overrides through the test layer", () =>
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
@@ -36,9 +44,10 @@ describe("TwitterConfig", () => {
       expect(config.timeline.defaultLimit).toBe(5);
       expect(config.timeline.maxPageSize).toBe(40);
       expect(config.search.maxPageSize).toBe(10);
+      expect(config.pagination.jitterMs).toBe(0);
     }).pipe(
       Effect.provide(
-        TwitterConfig.defaultLayer({
+        TwitterConfig.testLayer({
           proxyUrl: "http://localhost:9999",
           timeline: {
             defaultLimit: 5,

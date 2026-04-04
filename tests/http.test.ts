@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { describe, expect } from "vitest";
 
 import { TwitterHttpClient } from "../index";
+import { HttpStatusError } from "../src/errors";
 import { buildHttpClientRequest } from "../src/http";
 import { prepareApiRequest, type ApiRequest } from "../src/request";
 
@@ -73,6 +74,49 @@ describe("TwitterHttpClient transport", () => {
             {
               status: 200,
               json: { guest_token: "guest-1" },
+            },
+          ],
+        }),
+      ),
+    ),
+  );
+
+  it.effect("redacts sensitive response headers on HttpStatusError", () =>
+    Effect.gen(function* () {
+      const request = makePreparedRequest({
+        endpointId: "TransportForbidden",
+        family: "rest",
+        authRequirement: "guest",
+        bearerToken: "secondary",
+        rateLimitBucket: "generic",
+        method: "GET",
+        url: "https://api.x.com/forbidden",
+        responseKind: "json",
+        decode: (body) => body,
+      });
+
+      const http = yield* TwitterHttpClient;
+      const error = yield* Effect.flip(http.execute(request));
+
+      expect(error).toBeInstanceOf(HttpStatusError);
+      if (!(error instanceof HttpStatusError)) {
+        return;
+      }
+
+      expect(error.status).toBe(403);
+      expect(error.headers["set-cookie"]).toBe("<redacted>");
+      expect(error.headers["x-rate-limit-limit"]).toBe("100");
+    }).pipe(
+      Effect.provide(
+        TwitterHttpClient.scriptedLayer({
+          "GET https://api.x.com/forbidden": [
+            {
+              status: 403,
+              headers: {
+                "set-cookie": "auth_token=SECRET; Path=/; HttpOnly",
+                "x-rate-limit-limit": "100",
+              },
+              json: { errors: [{ message: "blocked" }] },
             },
           ],
         }),

@@ -37,19 +37,47 @@ const HASH_TAG_RE = /\B(\#\S+\b)/g;
 const CASH_TAG_RE = /\B(\$\S+\b)/g;
 const TWITTER_URL_RE = /https:(\/\/t\.co\/([A-Za-z0-9]|[A-Za-z]){10})/g;
 const USERNAME_RE = /\B(\@\S{1,15}\b)/g;
+const HTML_ESCAPE_RE = /[&<>"']/g;
+
+const HTML_ESCAPE_MAP: Readonly<Record<string, string>> = {
+  "&": "&amp;",
+  "\"": "&quot;",
+  "'": "&#39;",
+  "<": "&lt;",
+  ">": "&gt;",
+};
 
 // ---------------------------------------------------------------------------
 // HTML link helpers
 // ---------------------------------------------------------------------------
 
+const escapeHtml = (value: string) =>
+  value.replace(HTML_ESCAPE_RE, (char) => HTML_ESCAPE_MAP[char] ?? char);
+
+const safeHtmlUrl = (value: string | undefined) => {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return undefined;
+    }
+    return escapeHtml(url.toString());
+  } catch {
+    return undefined;
+  }
+};
+
 const linkHashtagHtml = (value: string) =>
-  `<a href="https://x.com/hashtag/${value.replace("#", "")}">${value}</a>`;
+  `<a href="https://x.com/hashtag/${encodeURIComponent(value.replace("#", ""))}">${value}</a>`;
 
 const linkCashtagHtml = (value: string) =>
-  `<a href="https://x.com/search?q=%24${value.replace("$", "")}">${value}</a>`;
+  `<a href="https://x.com/search?q=${encodeURIComponent(value)}">${value}</a>`;
 
 const linkUsernameHtml = (value: string) =>
-  `<a href="https://x.com/${value.replace("@", "")}">${value}</a>`;
+  `<a href="https://x.com/${encodeURIComponent(value.replace("@", ""))}">${value}</a>`;
 
 // ---------------------------------------------------------------------------
 // parseTimestamp
@@ -156,7 +184,7 @@ export const reconstructTweetHtml = (
   videos: ReadonlyArray<TweetVideo>,
 ) => {
   const includedMedia = new Set<string>();
-  let html = text ?? "";
+  let html = escapeHtml(text ?? "");
 
   html = html.replace(HASH_TAG_RE, linkHashtagHtml);
   html = html.replace(CASH_TAG_RE, linkCashtagHtml);
@@ -164,14 +192,22 @@ export const reconstructTweetHtml = (
   html = html.replace(TWITTER_URL_RE, (tco) => {
     for (const url of legacy.entities?.urls ?? []) {
       if (url.url === tco && url.expanded_url) {
-        return `<a href="${url.expanded_url}">${tco}</a>`;
+        const safeExpandedUrl = safeHtmlUrl(url.expanded_url);
+        if (safeExpandedUrl) {
+          return `<a href="${safeExpandedUrl}">${tco}</a>`;
+        }
       }
     }
 
     for (const media of legacy.extended_entities?.media ?? []) {
       if (media.url === tco && media.media_url_https) {
-        includedMedia.add(media.media_url_https);
-        return `<br><a href="${tco}"><img src="${media.media_url_https}"/></a>`;
+        const safeMediaUrl = safeHtmlUrl(media.media_url_https);
+        const safeTcoUrl = safeHtmlUrl(tco);
+
+        if (safeMediaUrl && safeTcoUrl) {
+          includedMedia.add(media.media_url_https);
+          return `<br><a href="${safeTcoUrl}"><img src="${safeMediaUrl}"/></a>`;
+        }
       }
     }
 
@@ -179,14 +215,16 @@ export const reconstructTweetHtml = (
   });
 
   for (const photo of photos) {
-    if (!includedMedia.has(photo.url)) {
-      html += `<br><img src="${photo.url}"/>`;
+    const safePhotoUrl = safeHtmlUrl(photo.url);
+    if (safePhotoUrl && !includedMedia.has(photo.url)) {
+      html += `<br><img src="${safePhotoUrl}"/>`;
     }
   }
 
   for (const video of videos) {
-    if (!includedMedia.has(video.preview)) {
-      html += `<br><img src="${video.preview}"/>`;
+    const safePreviewUrl = safeHtmlUrl(video.preview);
+    if (safePreviewUrl && !includedMedia.has(video.preview)) {
+      html += `<br><img src="${safePreviewUrl}"/>`;
     }
   }
 
