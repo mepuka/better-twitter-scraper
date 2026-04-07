@@ -50,13 +50,11 @@ describe("Bookmarks endpoint registry", () => {
     expect(request.bearerToken).toBe("secondary");
     expect(request.rateLimitBucket).toBe("bookmarks");
     expect(request.method).toBe("GET");
-    expect(request.url).toContain("/Bookmarks");
+    expect(request.url).toContain("/BookmarkSearchTimeline");
     expect(decodeURIComponent(request.url)).toContain("\"count\":200");
+    expect(decodeURIComponent(request.url)).toContain("\"rawQuery\":");
     expect(decodeURIComponent(request.url)).toContain(
-      "\"includePromotedContent\":false",
-    );
-    expect(decodeURIComponent(request.url)).toContain(
-      "graphql_timeline_v2_bookmark_timeline",
+      "content_disclosure_indicator_enabled",
     );
   });
 

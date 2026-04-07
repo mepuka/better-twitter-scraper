@@ -1,5 +1,4 @@
 import { Clock, Effect, Layer, Option, Ref, ServiceMap } from "effect";
-import { SignedInSessionRevision } from "./signed-in-session-revision";
 
 import ClientTransaction from "x-client-transaction-id";
 import { parseHTML } from "linkedom";
@@ -9,7 +8,8 @@ import {
   CHROME_SEC_CH_UA_MOBILE,
   CHROME_SEC_CH_UA_PLATFORM,
 } from "./chrome-fingerprint";
-import { TwitterConfig } from "./config";
+import { TwitterConfig, type TwitterConfigShape } from "./config";
+import { CookieManager, type CookieStoreInstance } from "./cookies";
 import {
   HttpStatusError,
   InvalidResponseError,
@@ -23,6 +23,18 @@ type TransactionIdError =
   | InvalidResponseError
   | TransportError;
 type TransactionDocument = ReturnType<typeof parseHTML>["document"];
+type TransactionTransport = {
+  readonly execute: <A>(
+    request: PreparedApiRequest<A>,
+  ) => Effect.Effect<
+    {
+      readonly headers: Readonly<Record<string, string>>;
+      readonly cookies: import("effect/unstable/http/Cookies").Cookies;
+      readonly body: string | unknown;
+    },
+    HttpStatusError | InvalidResponseError | TransportError
+  >;
+};
 
 const DOCUMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -31,7 +43,13 @@ const migrationRedirectionRegex = new RegExp(
   "i",
 );
 
-const navigationHeaders = (userAgent: string): Readonly<Record<string, string>> => ({
+const navigationHeaders = (
+  userAgent: string,
+  options: {
+    readonly cookieHeader?: string;
+    readonly csrfToken?: string;
+  } = {},
+): Readonly<Record<string, string>> => ({
   "user-agent": userAgent,
   accept:
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -47,6 +65,8 @@ const navigationHeaders = (userAgent: string): Readonly<Record<string, string>> 
   "sec-fetch-site": "none",
   "sec-fetch-user": "?1",
   "upgrade-insecure-requests": "1",
+  ...(options.cookieHeader ? { cookie: options.cookieHeader } : {}),
+  ...(options.csrfToken ? { "x-csrf-token": options.csrfToken } : {}),
 });
 
 const transactionDocumentError = (reason: string) =>
@@ -87,6 +107,178 @@ const pageVisitRequest = ({
   },
 });
 
+const sessionKeyFromSnapshot = (snapshot: Readonly<Record<string, string>>) =>
+  [
+    snapshot.auth_token ?? "",
+    snapshot.ct0 ?? "",
+    snapshot.guest_id ?? "",
+  ].join("\u0000");
+
+export const createTransactionIdInstance = (deps: {
+  readonly config: TwitterConfigShape;
+  readonly http: TransactionTransport;
+  readonly cookies: Pick<CookieStoreInstance, "get" | "getCookieHeader" | "snapshot">;
+}) =>
+  Effect.gen(function* () {
+    const cacheRef = yield* Ref.make(
+      Option.none<{
+        readonly document: TransactionDocument;
+        readonly cachedAt: number;
+        readonly sessionKey: string;
+      }>(),
+    );
+
+    const fetchText = Effect.fn("TwitterTransactionId.fetchText")(function* (
+      request: PreparedApiRequest<string>,
+    ) {
+      const response = yield* deps.http.execute(request);
+      if (typeof response.body !== "string") {
+        return yield* transactionDocumentError("Expected an HTML document string.");
+      }
+      return response.body;
+    });
+
+    const loadDocument = Effect.fn("TwitterTransactionId.loadDocument")(function* () {
+      const cookieHeader = yield* deps.cookies.getCookieHeader;
+      const csrfToken = yield* deps.cookies.get("ct0");
+      const headers = navigationHeaders(deps.config.userAgent, {
+        ...(cookieHeader ? { cookieHeader } : {}),
+        ...(csrfToken ? { csrfToken } : {}),
+      });
+      const homeHtml = yield* fetchText(
+        pageVisitRequest({
+          endpointId: "TransactionIdHome",
+          headers,
+          method: "GET",
+          url: "https://x.com",
+        }),
+      );
+
+      let window = parseHTML(homeHtml);
+      let document = window.document;
+
+      const metaRefresh = document.querySelector("meta[http-equiv='refresh']");
+      const metaContent = metaRefresh?.getAttribute("content") ?? "";
+      const migrationUrl =
+        migrationRedirectionRegex.exec(metaContent)?.[0] ??
+        migrationRedirectionRegex.exec(homeHtml)?.[0];
+
+      if (migrationUrl) {
+        const redirectHtml = yield* fetchText(
+          pageVisitRequest({
+            endpointId: "TransactionIdMigrationRedirect",
+            headers,
+            method: "GET",
+            url: migrationUrl,
+          }),
+        );
+        window = parseHTML(redirectHtml);
+        document = window.document;
+      }
+
+      const migrationForm =
+        document.querySelector("form[name='f']") ??
+        document.querySelector("form[action='https://x.com/x/migrate']");
+
+      if (migrationForm) {
+        const formEntries: Record<string, string> = {};
+        for (const input of migrationForm.querySelectorAll("input")) {
+          const name = input.getAttribute("name");
+          const value = input.getAttribute("value");
+          if (name && value) {
+            formEntries[name] = value;
+          }
+        }
+
+        const formUrl =
+          migrationForm.getAttribute("action") ?? "https://x.com/x/migrate";
+        const formMethod = (
+          migrationForm.getAttribute("method") ?? "POST"
+        ).toUpperCase() as "GET" | "POST";
+        const formHtml = yield* fetchText(
+          pageVisitRequest({
+            endpointId: "TransactionIdMigrationForm",
+            headers,
+            method: formMethod,
+            url: formUrl,
+            ...(formMethod === "POST"
+              ? {
+                  body: {
+                    _tag: "form" as const,
+                    value: formEntries,
+                  },
+                }
+              : {}),
+          }),
+        );
+        window = parseHTML(formHtml);
+        document = window.document;
+      }
+
+      return document;
+    });
+
+    const cachedDocument = Effect.fn("TwitterTransactionId.cachedDocument")(function* () {
+      const existing = yield* Ref.get(cacheRef);
+      const now = yield* Clock.currentTimeMillis;
+      const currentSessionKey = yield* deps.cookies.snapshot.pipe(
+        Effect.map(sessionKeyFromSnapshot),
+      );
+
+      if (
+        Option.isSome(existing) &&
+        now - existing.value.cachedAt < DOCUMENT_CACHE_TTL_MS &&
+        existing.value.sessionKey === currentSessionKey
+      ) {
+        return existing.value.document;
+      }
+
+      const document = yield* loadDocument();
+      yield* Ref.set(
+        cacheRef,
+        Option.some({
+          document,
+          cachedAt: now,
+          sessionKey: currentSessionKey,
+        }),
+      );
+      return document;
+    });
+
+    const headerFor = Effect.fn("TwitterTransactionId.headerFor")(
+      (request: {
+        readonly method: string;
+        readonly url: string;
+      }) =>
+        Effect.gen(function* () {
+          const document = yield* cachedDocument();
+          const url = new URL(request.url);
+
+          const transactionId = yield* Effect.tryPromise({
+            try: async () => {
+              const transaction = await ClientTransaction.create(document);
+              return transaction.generateTransactionId(
+                request.method.toUpperCase(),
+                url.pathname,
+              );
+            },
+            catch: (error) =>
+              transactionDocumentError(
+                error instanceof Error
+                  ? error.message
+                  : "Failed to generate X transaction ID.",
+              ),
+          });
+
+          return {
+            "x-client-transaction-id": transactionId,
+          } as const;
+        }).pipe(Effect.withSpan("TwitterTransactionId.headerFor")),
+    );
+
+    return { headerFor };
+  });
+
 export class TwitterTransactionId extends ServiceMap.Service<
   TwitterTransactionId,
   {
@@ -116,157 +308,12 @@ export class TwitterTransactionId extends ServiceMap.Service<
     Effect.gen(function* () {
       const config = yield* TwitterConfig;
       const http = yield* TwitterHttpClient;
-      const sessionRevision = yield* SignedInSessionRevision;
-      const cacheRef = yield* Ref.make(
-        Option.none<{
-          readonly document: TransactionDocument;
-          readonly cachedAt: number;
-          readonly revision: number;
-        }>(),
-      );
-
-      const fetchText = Effect.fn("TwitterTransactionId.fetchText")(function* (
-        request: PreparedApiRequest<string>,
-      ) {
-        const response = yield* http.execute(request);
-        if (typeof response.body !== "string") {
-          return yield* transactionDocumentError("Expected an HTML document string.");
-        }
-        return response.body;
+      const cookies = yield* CookieManager;
+      return yield* createTransactionIdInstance({
+        config,
+        http,
+        cookies,
       });
-
-      const loadDocument = Effect.fn("TwitterTransactionId.loadDocument")(function* () {
-        const headers = navigationHeaders(config.userAgent);
-        const homeHtml = yield* fetchText(
-          pageVisitRequest({
-            endpointId: "TransactionIdHome",
-            headers,
-            method: "GET",
-            url: "https://x.com",
-          }),
-        );
-
-        let window = parseHTML(homeHtml);
-        let document = window.document;
-
-        const metaRefresh = document.querySelector("meta[http-equiv='refresh']");
-        const metaContent = metaRefresh?.getAttribute("content") ?? "";
-        const migrationUrl =
-          migrationRedirectionRegex.exec(metaContent)?.[0] ??
-          migrationRedirectionRegex.exec(homeHtml)?.[0];
-
-        if (migrationUrl) {
-          const redirectHtml = yield* fetchText(
-            pageVisitRequest({
-              endpointId: "TransactionIdMigrationRedirect",
-              headers,
-              method: "GET",
-              url: migrationUrl,
-            }),
-          );
-          window = parseHTML(redirectHtml);
-          document = window.document;
-        }
-
-        const migrationForm =
-          document.querySelector("form[name='f']") ??
-          document.querySelector("form[action='https://x.com/x/migrate']");
-
-        if (migrationForm) {
-          const formEntries: Record<string, string> = {};
-          for (const input of migrationForm.querySelectorAll("input")) {
-            const name = input.getAttribute("name");
-            const value = input.getAttribute("value");
-            if (name && value) {
-              formEntries[name] = value;
-            }
-          }
-
-          const formUrl =
-            migrationForm.getAttribute("action") ?? "https://x.com/x/migrate";
-          const formMethod = (
-            migrationForm.getAttribute("method") ?? "POST"
-          ).toUpperCase() as "GET" | "POST";
-          const formHtml = yield* fetchText(
-            pageVisitRequest({
-              endpointId: "TransactionIdMigrationForm",
-              headers,
-              method: formMethod,
-              url: formUrl,
-              ...(formMethod === "POST"
-                ? {
-                    body: {
-                      _tag: "form" as const,
-                      value: formEntries,
-                    },
-                  }
-                : {}),
-            }),
-          );
-          window = parseHTML(formHtml);
-          document = window.document;
-        }
-
-        return document;
-      });
-
-      const cachedDocument = Effect.fn("TwitterTransactionId.cachedDocument")(function* () {
-        const existing = yield* Ref.get(cacheRef);
-        const now = yield* Clock.currentTimeMillis;
-        const currentRevision = yield* sessionRevision.current;
-
-        if (
-          Option.isSome(existing) &&
-          now - existing.value.cachedAt < DOCUMENT_CACHE_TTL_MS &&
-          existing.value.revision === currentRevision
-        ) {
-          return existing.value.document;
-        }
-
-        const document = yield* loadDocument();
-        yield* Ref.set(
-          cacheRef,
-          Option.some({
-            document,
-            cachedAt: now,
-            revision: currentRevision,
-          }),
-        );
-        return document;
-      });
-
-      const headerFor = Effect.fn("TwitterTransactionId.headerFor")(
-        (request: {
-          readonly method: string;
-          readonly url: string;
-        }) =>
-          Effect.gen(function* () {
-            const document = yield* cachedDocument();
-            const url = new URL(request.url);
-
-            const transactionId = yield* Effect.tryPromise({
-              try: async () => {
-                const transaction = await ClientTransaction.create(document);
-                return transaction.generateTransactionId(
-                  request.method.toUpperCase(),
-                  url.pathname,
-                );
-              },
-              catch: (error) =>
-                transactionDocumentError(
-                  error instanceof Error
-                    ? error.message
-                    : "Failed to generate X transaction ID.",
-                ),
-            });
-
-            return {
-              "x-client-transaction-id": transactionId,
-            } as const;
-          }).pipe(Effect.withSpan("TwitterTransactionId.headerFor")),
-      );
-
-      return { headerFor };
     }),
   );
 }

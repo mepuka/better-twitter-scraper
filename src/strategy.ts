@@ -19,8 +19,8 @@ import {
   classifyHttpStatusError,
   decodeParsedBody,
 } from "./http-client-utils";
+import { TwitterEndpointCatalog } from "./endpoint-catalog";
 import { TwitterEndpointDiscovery } from "./endpoint-discovery";
-import { updateQueryIds } from "./endpoints";
 import { TwitterHttpClient } from "./http";
 import {
   logDebugDecision,
@@ -87,6 +87,22 @@ interface StrategyRateLimiter {
   }>;
 }
 
+interface StrategyEndpointCatalog {
+  readonly resolveRequest: <A>(
+    request: ApiRequest<A>,
+  ) => Effect.Effect<ApiRequest<A>>;
+  readonly updateQueryIds: (
+    discovered: ReadonlyMap<string, string>,
+  ) => Effect.Effect<void>;
+}
+
+type StrategyDiscovery = Option.Option<{
+  readonly refreshQueryIds: () => Effect.Effect<
+    ReadonlyMap<string, string>,
+    HttpStatusError | InvalidResponseError | TransportError
+  >;
+}>;
+
 export const createStrategyExecute = (
   auth: {
     readonly guest: Option.Option<RequestAuthHelper>;
@@ -96,6 +112,8 @@ export const createStrategyExecute = (
   http: StrategyTransport,
   rateLimiter: StrategyRateLimiter,
   transport: TransportName,
+  endpointCatalog: StrategyEndpointCatalog,
+  discovery: StrategyDiscovery,
   retryLimit = 1,
   requestTimeout: Duration.Duration = Duration.millis(30_000),
 ) => {
@@ -122,21 +140,36 @@ export const createStrategyExecute = (
           onSome: Effect.succeed,
         });
 
+  const isEmptyGraphqlNotFound = (
+    request: ApiRequest<unknown>,
+    error: HttpStatusError,
+  ) =>
+    request.graphqlOperationName !== undefined &&
+    (request.family === "graphql" || request.family === "graphqlAlt") &&
+    error.status === 404 &&
+    error.body.trim().length === 0;
+
   const executeOnce = <A>(
     request: ApiRequest<A>,
   ): Effect.Effect<A, StrategyError> =>
     Effect.gen(function* () {
-      const requestAuth = yield* resolveRequestAuth(request);
-      yield* rateLimiter.awaitReady(request.rateLimitBucket);
-      const headers = yield* requestAuth.headersFor(request);
-      const response = yield* http.execute(prepareApiRequest(request, headers)).pipe(
+      const resolvedRequest = yield* endpointCatalog.resolveRequest(request);
+      const requestAuth = yield* resolveRequestAuth(resolvedRequest);
+      yield* rateLimiter.awaitReady(resolvedRequest.rateLimitBucket);
+      const headers = yield* requestAuth.headersFor(resolvedRequest);
+      const response = yield* http.execute(
+        prepareApiRequest(resolvedRequest, headers),
+      ).pipe(
         Effect.timeoutOrElse({
           duration: requestTimeout,
-          onTimeout: () => Effect.fail(new TransportError({
-            url: request.url,
-            reason: `Request to ${request.endpointId} timed out after ${Duration.toMillis(requestTimeout)}ms`,
-            error: new Error("timeout"),
-          })),
+          orElse: () =>
+            Effect.fail(
+              new TransportError({
+                url: resolvedRequest.url,
+                reason: `Request to ${resolvedRequest.endpointId} timed out after ${Duration.toMillis(requestTimeout)}ms`,
+                error: new Error("timeout"),
+              }),
+            ),
         }),
         Effect.retry({
           while: (error) => error._tag === "TransportError",
@@ -148,14 +181,14 @@ export const createStrategyExecute = (
       yield* cookies.applySetCookies(response.cookies);
 
       const limiterResult = yield* rateLimiter.noteResponse({
-        bucket: request.rateLimitBucket,
+        bucket: resolvedRequest.rateLimitBucket,
         headers: response.headers,
       });
 
       if (
         limiterResult.incomingExhausted &&
-        request.authRequirement === "guest" &&
-        request.bearerToken === "default"
+        resolvedRequest.authRequirement === "guest" &&
+        resolvedRequest.bearerToken === "default"
       ) {
         yield* logDebugDecision("Guest token invalidated from warning header", {
           warning_header: "x-rate-limit-incoming",
@@ -164,15 +197,42 @@ export const createStrategyExecute = (
         yield* requestAuth.invalidate;
       }
 
-      return yield* decodeParsedBody(request, response.body);
+      return yield* decodeParsedBody(resolvedRequest, response.body);
     });
 
   const executeWithRetry = <A>(
     request: ApiRequest<A>,
     attempt = 0,
+    refreshedQueryIds = false,
   ): Effect.Effect<A, StrategyError> =>
     executeOnce(request).pipe(
       Effect.catchTag("HttpStatusError", (error) => {
+        if (
+          !refreshedQueryIds &&
+          Option.isSome(discovery) &&
+          isEmptyGraphqlNotFound(request, error)
+        ) {
+          return Effect.gen(function* () {
+            const discovered = yield* discovery.value.refreshQueryIds().pipe(
+              Effect.orElseSucceed(() => new Map<string, string>()),
+            );
+
+            if (discovered.size > 0) {
+              yield* endpointCatalog.updateQueryIds(discovered);
+            }
+
+            yield* logDebugDecision(
+              "Query ID refresh scheduled after empty GraphQL 404",
+              {
+                endpoint_id: request.endpointId,
+                operation_name: request.graphqlOperationName,
+              },
+            );
+
+            return yield* executeWithRetry(request, attempt, true);
+          });
+        }
+
         if (
           attempt < retryLimit &&
           request.authRequirement === "guest" &&
@@ -185,7 +245,7 @@ export const createStrategyExecute = (
               status: error.status,
             });
             yield* requestAuth.invalidate;
-            return yield* executeWithRetry(request, attempt + 1);
+            return yield* executeWithRetry(request, attempt + 1, refreshedQueryIds);
           });
         }
 
@@ -205,7 +265,7 @@ export const createStrategyExecute = (
             ),
             Effect.flatMap(() =>
               attempt < retryLimit
-                ? executeWithRetry(request, attempt + 1)
+                ? executeWithRetry(request, attempt + 1, refreshedQueryIds)
                 : Effect.fail(classified),
             ),
           );
@@ -257,6 +317,7 @@ export class ScraperStrategy extends ServiceMap.Service<
         const http = yield* TwitterHttpClient;
         const transport = yield* TransportMetadata;
         const rateLimiter = yield* RateLimiter;
+        const endpointCatalog = yield* TwitterEndpointCatalog;
 
         const discovery = yield* Effect.serviceOption(TwitterEndpointDiscovery);
         if (Option.isSome(discovery)) {
@@ -264,7 +325,7 @@ export class ScraperStrategy extends ServiceMap.Service<
             Effect.orElseSucceed(() => new Map<string, string>()),
           );
           if (discovered.size > 0) {
-            updateQueryIds(discovered);
+            yield* endpointCatalog.updateQueryIds(discovered);
           }
         }
 
@@ -278,11 +339,16 @@ export class ScraperStrategy extends ServiceMap.Service<
             http,
             rateLimiter,
             transport.name,
+            endpointCatalog,
+            discovery,
             config.strategy.retryLimit,
             config.requestTimeout,
           ),
         };
       }),
-    ).pipe(Layer.provideMerge(RateLimiter.liveLayer));
+    ).pipe(
+      Layer.provideMerge(TwitterEndpointCatalog.liveLayer),
+      Layer.provideMerge(RateLimiter.liveLayer),
+    );
   }
 }

@@ -11,9 +11,9 @@ import { TwitterLists } from "./lists";
 import { TwitterPublic } from "./public";
 import { TwitterRelationships } from "./relationships";
 import { TwitterSearch } from "./search";
+import { TwitterSessionState } from "./session-state";
 import { SignedInSessionRevision } from "./signed-in-session-revision";
 import { ScraperStrategy } from "./strategy";
-import { TwitterTransactionId } from "./transaction-id";
 import { TwitterTrends } from "./trends";
 import { TwitterTweets } from "./tweets";
 import { UserAuth } from "./user-auth";
@@ -35,6 +35,7 @@ export interface ScraperOptions {
     readonly requestTimeoutMs: number;
     readonly retryLimit: number;
     readonly paginationJitterMs: number;
+    readonly sessionFailureCooldownMs: number;
   }>;
 }
 
@@ -57,12 +58,11 @@ const authenticatedServicesLayer = Layer.mergeAll(
   TwitterDirectMessages.layer,
 );
 
-// Trends currently depend on a single shared auth/cookie state for login
-// checks and cache keys, which does not map cleanly onto pooled sessions.
 const pooledServicesLayer = Layer.mergeAll(
   TwitterPublic.layer,
   TwitterSearch.layer,
   TwitterTweets.layer,
+  TwitterTrends.layer,
   TwitterRelationships.layer,
   TwitterLists.layer,
   TwitterDirectMessages.layer,
@@ -107,7 +107,28 @@ export class TwitterScraper {
         ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
         : {}),
       ...(options?.config?.retryLimit !== undefined
-        ? { strategy: { retryLimit: options.config.retryLimit } }
+        ? {
+            strategy: {
+              retryLimit: options.config.retryLimit,
+              ...(options?.config?.sessionFailureCooldownMs !== undefined
+                ? {
+                    sessionFailureCooldown: Duration.millis(
+                      options.config.sessionFailureCooldownMs,
+                    ),
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      ...(options?.config?.retryLimit === undefined &&
+      options?.config?.sessionFailureCooldownMs !== undefined
+        ? {
+            strategy: {
+              sessionFailureCooldown: Duration.millis(
+                options.config.sessionFailureCooldownMs,
+              ),
+            },
+          }
         : {}),
       ...(options?.config?.paginationJitterMs !== undefined
         ? { pagination: { jitterMs: options.config.paginationJitterMs } }
@@ -118,6 +139,7 @@ export class TwitterScraper {
       Layer.provideMerge(ScraperStrategy.standardLayer),
       Layer.provideMerge(GuestAuth.liveLayer),
       Layer.provideMerge(CookieManager.liveLayer),
+      Layer.provideMerge(TwitterSessionState.liveLayer),
       Layer.provideMerge(TwitterHttpClient.cycleTlsLayer(options?.proxyUrl)),
       Layer.provideMerge(configLayer),
     );
@@ -152,7 +174,28 @@ export class TwitterScraper {
         ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
         : {}),
       ...(options?.config?.retryLimit !== undefined
-        ? { strategy: { retryLimit: options.config.retryLimit } }
+        ? {
+            strategy: {
+              retryLimit: options.config.retryLimit,
+              ...(options?.config?.sessionFailureCooldownMs !== undefined
+                ? {
+                    sessionFailureCooldown: Duration.millis(
+                      options.config.sessionFailureCooldownMs,
+                    ),
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      ...(options?.config?.retryLimit === undefined &&
+      options?.config?.sessionFailureCooldownMs !== undefined
+        ? {
+            strategy: {
+              sessionFailureCooldown: Duration.millis(
+                options.config.sessionFailureCooldownMs,
+              ),
+            },
+          }
         : {}),
       ...(options?.config?.paginationJitterMs !== undefined
         ? { pagination: { jitterMs: options.config.paginationJitterMs } }
@@ -164,6 +207,7 @@ export class TwitterScraper {
       Layer.provideMerge(GuestAuth.liveLayer),
       Layer.provideMerge(UserAuth.liveLayer),
       Layer.provideMerge(CookieManager.liveLayer),
+      Layer.provideMerge(TwitterSessionState.liveLayer),
       Layer.provideMerge(TwitterEndpointDiscovery.liveLayer),
       Layer.provideMerge(TwitterHttpClient.cycleTlsLayer(options?.proxyUrl)),
       Layer.provideMerge(configLayer),
@@ -236,7 +280,28 @@ export class TwitterScraper {
         ? { requestTimeout: Duration.millis(options.config.requestTimeoutMs) }
         : {}),
       ...(options?.config?.retryLimit !== undefined
-        ? { strategy: { retryLimit: options.config.retryLimit } }
+        ? {
+            strategy: {
+              retryLimit: options.config.retryLimit,
+              ...(options?.config?.sessionFailureCooldownMs !== undefined
+                ? {
+                    sessionFailureCooldown: Duration.millis(
+                      options.config.sessionFailureCooldownMs,
+                    ),
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      ...(options?.config?.retryLimit === undefined &&
+      options?.config?.sessionFailureCooldownMs !== undefined
+        ? {
+            strategy: {
+              sessionFailureCooldown: Duration.millis(
+                options.config.sessionFailureCooldownMs,
+              ),
+            },
+          }
         : {}),
       ...(options?.config?.paginationJitterMs !== undefined
         ? { pagination: { jitterMs: options.config.paginationJitterMs } }
@@ -245,8 +310,8 @@ export class TwitterScraper {
 
     return pooledServicesLayer.pipe(
       Layer.provideMerge(PooledScraperStrategy.layer(initialSessions)),
+      Layer.provideMerge(TwitterSessionState.pooledLayer),
       Layer.provideMerge(TwitterEndpointDiscovery.liveLayer),
-      Layer.provideMerge(TwitterTransactionId.liveLayer),
       Layer.provideMerge(TwitterHttpClient.cycleTlsLayer(options?.proxyUrl)),
       Layer.provideMerge(configLayer),
       Layer.provide(SignedInSessionRevision.liveLayer),

@@ -8,6 +8,7 @@ import {
   ScraperStrategy,
   TwitterConfig,
   TwitterHttpClient,
+  TwitterSessionState,
   TwitterTrends,
   UserAuth,
 } from "../index";
@@ -16,7 +17,6 @@ import { HttpStatusError } from "../src/errors";
 import { transportMetadataLayer } from "../src/observability";
 import { type PreparedApiRequest } from "../src/request";
 import { UserRequestAuth } from "../src/request-auth";
-import { SignedInSessionRevision } from "../src/signed-in-session-revision";
 import { TwitterTransactionId } from "../src/transaction-id";
 import { trendsFixture } from "./fixtures";
 
@@ -84,7 +84,7 @@ const transactionIdLayer = (
   >,
 ) =>
   TwitterTransactionId.liveLayer.pipe(
-    Layer.provideMerge(SignedInSessionRevision.liveLayer),
+    Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(countingHttpLayer(handler)),
     Layer.provideMerge(TwitterConfig.testLayer()),
   );
@@ -121,6 +121,7 @@ const trendsLayer = (
 ) =>
   TwitterTrends.layer.pipe(
     Layer.provideMerge(ScraperStrategy.standardLayer),
+    Layer.provideMerge(TwitterSessionState.liveLayer),
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer()),
     Layer.provideMerge(countingHttpLayer(handler)),

@@ -193,6 +193,21 @@ interface TrendsGuideResponse {
 const getAvatarOriginalSizeUrl = (avatarUrl: string | undefined) =>
   avatarUrl ? avatarUrl.replace("_normal", "") : undefined;
 
+type TweetParseSkipReason =
+  | "missing_result"
+  | "missing_legacy"
+  | "missing_user_identity";
+
+type ParsedTweet =
+  | {
+      readonly _tag: "parsed";
+      readonly tweet: Tweet;
+    }
+  | {
+      readonly _tag: "skipped";
+      readonly reason: TweetParseSkipReason;
+    };
+
 const extractTweetResult = (content: TimelineEntryItemContentRaw) => {
   const rawResult = content.tweet_results?.result ?? content.tweetResult?.result;
   if (!rawResult) {
@@ -206,24 +221,41 @@ const extractTweetResult = (content: TimelineEntryItemContentRaw) => {
   return rawResult;
 };
 
-const parseTweet = (
+const parseTweetCandidate = (
   content: TimelineEntryItemContentRaw,
   entryId: string,
-): Tweet | undefined => {
+): ParsedTweet => {
   const result = extractTweetResult(content);
+  if (!result) {
+    return {
+      _tag: "skipped",
+      reason: "missing_result",
+    };
+  }
+
   const legacy = result?.legacy;
   const userLegacy = result?.core?.user_results?.result?.legacy;
   const userCore = result?.core?.user_results?.result?.core;
-  if (!legacy || !userLegacy) {
-    return undefined;
+  if (!legacy) {
+    return {
+      _tag: "skipped",
+      reason: "missing_legacy",
+    };
+  }
+
+  if (!userLegacy && !userCore) {
+    return {
+      _tag: "skipped",
+      reason: "missing_user_identity",
+    };
   }
 
   const id =
     result?.rest_id ??
     legacy.id_str ??
     entryId.replace(/^tweet-/, "").replace(/^conversation-/, "");
-  const username = userLegacy.screen_name ?? userCore?.screen_name;
-  const name = userLegacy.name ?? userCore?.name;
+  const username = userLegacy?.screen_name ?? userCore?.screen_name;
+  const name = userLegacy?.name ?? userCore?.name;
   const text =
     result?.note_tweet?.note_tweet_results?.result?.text ?? legacy.full_text;
   const { timeParsed, timestamp } = parseTimestamp(legacy.created_at);
@@ -238,104 +270,198 @@ const parseTweet = (
   const isEdited =
     (result?.edit_control?.edit_control_initial?.edit_tweet_ids?.length ?? 0) > 1;
 
-  return new Tweet({
-    id,
-    ...(legacy.conversation_id_str
-      ? { conversationId: legacy.conversation_id_str }
-      : {}),
-    hashtags:
-      legacy.entities?.hashtags
-        ?.flatMap((hashtag) => (hashtag.text ? [hashtag.text] : [])) ?? [],
-    mentions:
-      legacy.entities?.user_mentions
-        ?.flatMap((mention) =>
-          mention.id_str
-            ? [
-                new Mention({
-                  id: mention.id_str,
-                  ...(mention.screen_name
-                    ? { username: mention.screen_name }
-                    : {}),
-                  ...(mention.name ? { name: mention.name } : {}),
-                }),
-              ]
-            : [],
+  return {
+    _tag: "parsed",
+    tweet: new Tweet({
+      id,
+      ...(legacy.conversation_id_str
+        ? { conversationId: legacy.conversation_id_str }
+        : {}),
+      hashtags:
+        legacy.entities?.hashtags
+          ?.flatMap((hashtag) => (hashtag.text ? [hashtag.text] : [])) ?? [],
+      mentions:
+        legacy.entities?.user_mentions
+          ?.flatMap((mention) =>
+            mention.id_str
+              ? [
+                  new Mention({
+                    id: mention.id_str,
+                    ...(mention.screen_name
+                      ? { username: mention.screen_name }
+                      : {}),
+                    ...(mention.name ? { name: mention.name } : {}),
+                  }),
+                ]
+              : [],
+          ) ?? [],
+      ...(name ? { name } : {}),
+      ...(username && id
+        ? { permanentUrl: `https://x.com/${username}/status/${id}` }
+        : {}),
+      ...(text ? { text } : {}),
+      ...(timestamp !== undefined ? { timestamp } : {}),
+      ...(timeParsed ? { timeParsed } : {}),
+      urls:
+        legacy.entities?.urls?.flatMap((url) =>
+          url.expanded_url ?? url.url ? [url.expanded_url ?? url.url!] : [],
         ) ?? [],
-    ...(name ? { name } : {}),
-    ...(username && id
-      ? { permanentUrl: `https://x.com/${username}/status/${id}` }
-      : {}),
-    ...(text ? { text } : {}),
-    ...(timestamp !== undefined ? { timestamp } : {}),
-    ...(timeParsed ? { timeParsed } : {}),
-    urls:
-      legacy.entities?.urls?.flatMap((url) =>
-        url.expanded_url ?? url.url ? [url.expanded_url ?? url.url!] : [],
-      ) ?? [],
-    ...(legacy.user_id_str ? { userId: legacy.user_id_str } : {}),
-    ...(username ? { username } : {}),
-    ...(views !== undefined && !Number.isNaN(views) ? { views } : {}),
-    ...(legacy.favorite_count !== undefined
-      ? { likes: legacy.favorite_count }
-      : {}),
-    ...(legacy.reply_count !== undefined ? { replies: legacy.reply_count } : {}),
-    ...(legacy.retweet_count !== undefined
-      ? { retweets: legacy.retweet_count }
-      : {}),
-    photos,
-    videos,
-    ...(sensitiveContent ? { sensitiveContent } : {}),
-    ...(html ? { html } : {}),
-    ...(legacy.bookmark_count !== undefined ? { bookmarkCount: legacy.bookmark_count } : {}),
-    ...(isEdited ? { isEdited } : {}),
-    ...(legacy.place ? {
-      place: {
-        ...(legacy.place.id ? { id: legacy.place.id } : {}),
-        ...(legacy.place.name ? { name: legacy.place.name } : {}),
-        ...(legacy.place.full_name ? { fullName: legacy.place.full_name } : {}),
-        ...(legacy.place.country ? { country: legacy.place.country } : {}),
-        ...(legacy.place.country_code ? { countryCode: legacy.place.country_code } : {}),
-        ...(legacy.place.place_type ? { placeType: legacy.place.place_type } : {}),
-        ...(legacy.place.bounding_box ? {
-          boundingBox: {
-            ...(legacy.place.bounding_box.type ? { type: legacy.place.bounding_box.type } : {}),
-            ...(legacy.place.bounding_box.coordinates ? { coordinates: legacy.place.bounding_box.coordinates } : {}),
-          },
-        } : {}),
-      },
-    } : {}),
-    ...(content.tweetDisplayType === "SelfThread" ? { isSelfThread: true } : {}),
-    ...(entryId.startsWith("pinned-tweet-") ? { isPinned: true } : {}),
-    ...(entryId.startsWith("promoted-tweet-") ? { isPromoted: true } : {}),
-    isQuoted: legacy.quoted_status_id_str !== undefined,
-    isReply: legacy.in_reply_to_status_id_str !== undefined,
-    isRetweet: legacy.retweeted_status_id_str !== undefined,
-    ...(legacy.quoted_status_id_str
-      ? { quotedTweetId: legacy.quoted_status_id_str }
-      : {}),
-    ...(legacy.in_reply_to_status_id_str
-      ? { inReplyToTweetId: legacy.in_reply_to_status_id_str }
-      : {}),
-    ...(legacy.retweeted_status_id_str
-      ? { retweetedTweetId: legacy.retweeted_status_id_str }
-      : {}),
-    ...(result?.quoted_status_result?.result
-      ? {
-          quotedTweet: parseTweet(
-            { tweet_results: { result: result.quoted_status_result.result } },
-            `quoted-${id}`,
-          ),
-        }
-      : {}),
-    ...(legacy.retweeted_status_result?.result
-      ? {
-          retweetedTweet: parseTweet(
-            { tweet_results: { result: legacy.retweeted_status_result.result } },
-            `retweet-${id}`,
-          ),
-        }
-      : {}),
-  });
+      ...(legacy.user_id_str ? { userId: legacy.user_id_str } : {}),
+      ...(username ? { username } : {}),
+      ...(views !== undefined && !Number.isNaN(views) ? { views } : {}),
+      ...(legacy.favorite_count !== undefined
+        ? { likes: legacy.favorite_count }
+        : {}),
+      ...(legacy.reply_count !== undefined
+        ? { replies: legacy.reply_count }
+        : {}),
+      ...(legacy.retweet_count !== undefined
+        ? { retweets: legacy.retweet_count }
+        : {}),
+      photos,
+      videos,
+      ...(sensitiveContent ? { sensitiveContent } : {}),
+      ...(html ? { html } : {}),
+      ...(legacy.bookmark_count !== undefined
+        ? { bookmarkCount: legacy.bookmark_count }
+        : {}),
+      ...(isEdited ? { isEdited } : {}),
+      ...(legacy.place
+        ? {
+            place: {
+              ...(legacy.place.id ? { id: legacy.place.id } : {}),
+              ...(legacy.place.name ? { name: legacy.place.name } : {}),
+              ...(legacy.place.full_name
+                ? { fullName: legacy.place.full_name }
+                : {}),
+              ...(legacy.place.country
+                ? { country: legacy.place.country }
+                : {}),
+              ...(legacy.place.country_code
+                ? { countryCode: legacy.place.country_code }
+                : {}),
+              ...(legacy.place.place_type
+                ? { placeType: legacy.place.place_type }
+                : {}),
+              ...(legacy.place.bounding_box
+                ? {
+                    boundingBox: {
+                      ...(legacy.place.bounding_box.type
+                        ? { type: legacy.place.bounding_box.type }
+                        : {}),
+                      ...(legacy.place.bounding_box.coordinates
+                        ? {
+                            coordinates:
+                              legacy.place.bounding_box.coordinates,
+                          }
+                        : {}),
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      ...(content.tweetDisplayType === "SelfThread"
+        ? { isSelfThread: true }
+        : {}),
+      ...(entryId.startsWith("pinned-tweet-") ? { isPinned: true } : {}),
+      ...(entryId.startsWith("promoted-tweet-") ? { isPromoted: true } : {}),
+      isQuoted: legacy.quoted_status_id_str !== undefined,
+      isReply: legacy.in_reply_to_status_id_str !== undefined,
+      isRetweet: legacy.retweeted_status_id_str !== undefined,
+      ...(legacy.quoted_status_id_str
+        ? { quotedTweetId: legacy.quoted_status_id_str }
+        : {}),
+      ...(legacy.in_reply_to_status_id_str
+        ? { inReplyToTweetId: legacy.in_reply_to_status_id_str }
+        : {}),
+      ...(legacy.retweeted_status_id_str
+        ? { retweetedTweetId: legacy.retweeted_status_id_str }
+        : {}),
+      ...(result?.quoted_status_result?.result
+        ? {
+            quotedTweet: parseTweet(
+              { tweet_results: { result: result.quoted_status_result.result } },
+              `quoted-${id}`,
+            ),
+          }
+        : {}),
+      ...(legacy.retweeted_status_result?.result
+        ? {
+            retweetedTweet: parseTweet(
+              { tweet_results: { result: legacy.retweeted_status_result.result } },
+              `retweet-${id}`,
+            ),
+          }
+        : {}),
+    }),
+  };
+};
+
+const parseTweet = (
+  content: TimelineEntryItemContentRaw,
+  entryId: string,
+): Tweet | undefined => {
+  const parsed = parseTweetCandidate(content, entryId);
+  return parsed._tag === "parsed" ? parsed.tweet : undefined;
+};
+
+const isTweetLikeContent = (content: {
+  readonly tweet_results?: unknown;
+  readonly tweetResult?: unknown;
+  readonly tweetDisplayType?: string;
+}) =>
+  content.tweet_results !== undefined ||
+  content.tweetResult !== undefined ||
+  content.tweetDisplayType === "Tweet" ||
+  content.tweetDisplayType === "SelfThread";
+
+interface TweetSkipDiagnostics {
+  readonly sampleEntryIds: string[];
+  readonly skippedCount: number;
+  readonly reasons: Partial<Record<TweetParseSkipReason, number>>;
+}
+
+const emptyTweetSkipDiagnostics = (): TweetSkipDiagnostics => ({
+  sampleEntryIds: [],
+  skippedCount: 0,
+  reasons: {},
+});
+
+const recordSkippedTweetCandidate = (
+  diagnostics: TweetSkipDiagnostics,
+  entryId: string,
+  reason: TweetParseSkipReason,
+): TweetSkipDiagnostics => ({
+  skippedCount: diagnostics.skippedCount + 1,
+  reasons: {
+    ...diagnostics.reasons,
+    [reason]: (diagnostics.reasons[reason] ?? 0) + 1,
+  },
+  sampleEntryIds:
+    diagnostics.sampleEntryIds.length >= 3 ||
+    diagnostics.sampleEntryIds.includes(entryId)
+      ? diagnostics.sampleEntryIds
+      : [...diagnostics.sampleEntryIds, entryId],
+});
+
+const warnOnSkippedTweetCandidates = (
+  endpointId: string,
+  diagnostics: TweetSkipDiagnostics,
+) => {
+  if (diagnostics.skippedCount === 0) {
+    return;
+  }
+
+  console.warn(
+    `[better-twitter-scraper] ${endpointId} skipped ${diagnostics.skippedCount} tweet candidate(s) while parsing the response.`,
+    {
+      endpointId,
+      reasons: diagnostics.reasons,
+      sampleEntryIds: diagnostics.sampleEntryIds,
+      skippedCount: diagnostics.skippedCount,
+    },
+  );
 };
 
 const parseUserProfile = (input: {
@@ -572,6 +698,7 @@ const parseTweetsTimelinePage = (
   let nextCursor: string | undefined;
   let previousCursor: string | undefined;
   const items: Tweet[] = [];
+  let diagnostics = emptyTweetSkipDiagnostics();
 
   for (const instruction of instructions) {
     const entries = getInstructionEntries(instruction);
@@ -597,9 +724,15 @@ const parseTweetsTimelinePage = (
 
       const directItem = entry.content?.itemContent;
       if (directItem) {
-        const tweet = parseTweet(directItem, entry.entryId);
-        if (tweet) {
-          items.push(tweet);
+        const parsed = parseTweetCandidate(directItem, entry.entryId);
+        if (parsed._tag === "parsed") {
+          items.push(parsed.tweet);
+        } else if (isTweetLikeContent(directItem)) {
+          diagnostics = recordSkippedTweetCandidate(
+            diagnostics,
+            entry.entryId,
+            parsed.reason,
+          );
         }
       }
 
@@ -609,13 +742,21 @@ const parseTweetsTimelinePage = (
           continue;
         }
 
-        const tweet = parseTweet(moduleItem, entry.entryId);
-        if (tweet) {
-          items.push(tweet);
+        const parsed = parseTweetCandidate(moduleItem, entry.entryId);
+        if (parsed._tag === "parsed") {
+          items.push(parsed.tweet);
+        } else if (isTweetLikeContent(moduleItem)) {
+          diagnostics = recordSkippedTweetCandidate(
+            diagnostics,
+            entry.entryId,
+            parsed.reason,
+          );
         }
       }
     }
   }
+
+  warnOnSkippedTweetCandidates(options.endpointId, diagnostics);
 
   return {
     items,
@@ -670,9 +811,22 @@ export const parseBookmarksPageResponse = (
   body: unknown,
 ): TimelinePage<Tweet> => {
   const response = body as {
-    data?: { bookmark_timeline_v2?: { timeline?: { instructions?: ReadonlyArray<TimelineInstructionRaw> } } };
+    data?: {
+      // New shape: BookmarkSearchTimeline
+      search_by_raw_query?: {
+        bookmarks_search_timeline?: {
+          timeline?: { instructions?: ReadonlyArray<TimelineInstructionRaw> };
+        };
+      };
+      // Legacy shape: Bookmarks
+      bookmark_timeline_v2?: {
+        timeline?: { instructions?: ReadonlyArray<TimelineInstructionRaw> };
+      };
+    };
   };
   const instructions =
+    response.data?.search_by_raw_query?.bookmarks_search_timeline?.timeline
+      ?.instructions ??
     response.data?.bookmark_timeline_v2?.timeline?.instructions;
 
   return parseTweetsTimelinePage(instructions, {
@@ -728,6 +882,7 @@ const parseSearchTweetsTimelinePage = (
   let nextCursor: string | undefined;
   let previousCursor: string | undefined;
   const items: Tweet[] = [];
+  let diagnostics = emptyTweetSkipDiagnostics();
 
   for (const instruction of instructions) {
     if (
@@ -756,16 +911,24 @@ const parseSearchTweetsTimelinePage = (
         continue;
       }
 
-      const tweet = parseTweet(
+      const parsed = parseTweetCandidate(
         itemContent as unknown as TimelineEntryItemContentRaw,
         entry.entryId,
       );
 
-      if (tweet) {
-        items.push(tweet);
+      if (parsed._tag === "parsed") {
+        items.push(parsed.tweet);
+      } else {
+        diagnostics = recordSkippedTweetCandidate(
+          diagnostics,
+          entry.entryId,
+          parsed.reason,
+        );
       }
     }
   }
+
+  warnOnSkippedTweetCandidates("SearchTweets", diagnostics);
 
   return {
     items,

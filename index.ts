@@ -35,6 +35,7 @@ export { TwitterRelationships } from "./src/relationships";
 export { ScraperStrategy } from "./src/strategy";
 export type { StrategyError } from "./src/strategy";
 export { TwitterSearch } from "./src/search";
+export { TwitterSessionState } from "./src/session-state";
 export { TwitterTrends } from "./src/trends";
 export {
   TweetConversationProjection,

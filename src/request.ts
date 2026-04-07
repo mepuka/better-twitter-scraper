@@ -66,6 +66,8 @@ export interface ApiRequest<A> {
   readonly authRequirement: AuthRequirement;
   readonly bearerToken: BearerTokenName;
   readonly rateLimitBucket: RateLimitBucket;
+  readonly graphqlOperationName?: string;
+  readonly queryIdInBody?: boolean;
   readonly method: RequestMethod;
   readonly url: string;
   readonly headers?: Readonly<Record<string, string>>;

@@ -1,9 +1,9 @@
-import { Clock, Effect, Layer, Option, Ref, ServiceMap } from "effect";
+import { Clock, Duration, Effect, Layer, Option, Ref, ServiceMap } from "effect";
 
 import { TwitterConfig } from "./config";
 import type { SerializedCookie } from "./cookies";
+import { TwitterEndpointCatalog } from "./endpoint-catalog";
 import { TwitterEndpointDiscovery } from "./endpoint-discovery";
-import { updateQueryIds } from "./endpoints";
 import { AuthenticationError } from "./errors";
 import { TwitterHttpClient } from "./http";
 import { logDebugDecision, TransportMetadata } from "./observability";
@@ -26,6 +26,7 @@ import { TwitterTransactionId } from "./transaction-id";
 export interface SessionSnapshot {
   readonly id: number;
   readonly hasUserAuth: boolean;
+  readonly cooldownUntil?: number;
 }
 
 /**
@@ -76,12 +77,17 @@ class PooledInternals_ extends ServiceMap.Service<
 const sortByRateLimitState = (
   capsules: ReadonlyArray<SessionCapsule>,
   bucket: RateLimitBucket,
+  cooldowns: Readonly<Record<number, number>>,
 ) =>
   Effect.gen(function* () {
     const withState = yield* Effect.all(
       capsules.map((c) =>
         c.rateLimiter.snapshot(bucket).pipe(
-          Effect.map((state) => ({ capsule: c, state })),
+          Effect.map((state) => ({
+            capsule: c,
+            state,
+            cooldownUntil: cooldowns[c.id],
+          })),
         ),
       ),
     );
@@ -89,42 +95,47 @@ const sortByRateLimitState = (
     const nowMs = yield* Clock.currentTimeMillis;
     const nowEpochSec = Math.floor(nowMs / 1000);
 
-    const isAvailable = (s: BucketState) => {
-      // A session is blocked if blockedUntil is in the future
-      if (s.blockedUntil !== undefined && s.blockedUntil > nowMs) return false;
-      // Or if reset is in the future and remaining is 0
-      if (s.reset !== undefined && s.reset > nowEpochSec && s.remaining === 0) return false;
-      return true;
+    const rateLimitAvailableAt = (state: BucketState | null) => {
+      if (!state) {
+        return nowMs;
+      }
+
+      if (state.blockedUntil !== undefined && state.blockedUntil > nowMs) {
+        return state.blockedUntil;
+      }
+
+      if (
+        state.reset !== undefined &&
+        state.reset > nowEpochSec &&
+        state.remaining === 0
+      ) {
+        return state.reset * 1000;
+      }
+
+      return nowMs;
     };
 
-    const availableAt = (s: BucketState) => {
-      // When will this session next be available? (in ms from epoch)
-      const resetMs = s.reset !== undefined ? s.reset * 1000 : Infinity;
-      const blockedMs = s.blockedUntil ?? Infinity;
-      return Math.min(resetMs, blockedMs);
-    };
+    const sessionAvailableAt = (
+      state: BucketState | null,
+      cooldownUntil: number | undefined,
+    ) => Math.max(rateLimitAvailableAt(state), cooldownUntil ?? nowMs);
 
     return withState
       .sort((a, b) => {
-        // No state = fully available (best)
-        if (!a.state && !b.state) return 0;
-        if (!a.state) return -1;
-        if (!b.state) return 1;
-
-        const aOk = isAvailable(a.state);
-        const bOk = isAvailable(b.state);
+        const aAvailableAt = sessionAvailableAt(a.state, a.cooldownUntil);
+        const bAvailableAt = sessionAvailableAt(b.state, b.cooldownUntil);
+        const aOk = aAvailableAt <= nowMs;
+        const bOk = bAvailableAt <= nowMs;
         if (aOk && !bOk) return -1;
         if (!aOk && bOk) return 1;
 
         if (aOk && bOk) {
-          // Both available — prefer more remaining headroom
-          const aRemaining = a.state.remaining ?? Infinity;
-          const bRemaining = b.state.remaining ?? Infinity;
+          const aRemaining = a.state?.remaining ?? Infinity;
+          const bRemaining = b.state?.remaining ?? Infinity;
           return bRemaining - aRemaining;
         }
 
-        // Both unavailable — prefer the one that becomes available soonest
-        return availableAt(a.state) - availableAt(b.state);
+        return aAvailableAt - bAvailableAt;
       })
       .map((x) => x.capsule);
   });
@@ -142,14 +153,24 @@ export class PooledScraperStrategy {
       Effect.gen(function* () {
         const config = yield* TwitterConfig;
         const http = yield* TwitterHttpClient;
-        const transactionId = yield* TwitterTransactionId;
         const transport = yield* TransportMetadata;
+        const endpointCatalog = yield* TwitterEndpointCatalog;
+        const transactionIdOverride = yield* Effect.serviceOption(
+          TwitterTransactionId,
+        );
 
-        const shared = { config, transactionId, http };
+        const shared = {
+          config,
+          http,
+          ...(Option.isSome(transactionIdOverride)
+            ? { transactionIdOverride: transactionIdOverride.value }
+            : {}),
+        };
         const capsulesRef = yield* Ref.make<ReadonlyArray<SessionCapsule>>(
           [],
         );
         const nextIdRef = yield* Ref.make(0);
+        const cooldownsRef = yield* Ref.make<Readonly<Record<number, number>>>({});
 
         // Optionally discover endpoint IDs
         const discovery = yield* Effect.serviceOption(
@@ -162,7 +183,7 @@ export class PooledScraperStrategy {
               Effect.orElseSucceed(() => new Map<string, string>()),
             );
           if (discovered.size > 0) {
-            updateQueryIds(discovered);
+            yield* endpointCatalog.updateQueryIds(discovered);
           }
         }
 
@@ -191,6 +212,28 @@ export class PooledScraperStrategy {
             yield* Ref.update(capsulesRef, (cs) => [...cs, capsule]);
           });
 
+        const markSessionCooldown = Effect.fn(
+          "PooledScraperStrategy.markSessionCooldown",
+        )(function* (capsuleId: number, errorTag: string) {
+          const cooldownMs = Duration.toMillis(
+            config.strategy.sessionFailureCooldown,
+          );
+          if (cooldownMs <= 0) {
+            return;
+          }
+
+          const cooldownUntil = (yield* Clock.currentTimeMillis) + cooldownMs;
+          yield* Ref.update(cooldownsRef, (current) => ({
+            ...current,
+            [capsuleId]: cooldownUntil,
+          }));
+          yield* logDebugDecision("Session cooldown started", {
+            cooldown_until: cooldownUntil,
+            error_tag: errorTag,
+            session_id: capsuleId,
+          });
+        });
+
         const rotateOnSessionError = <A>(
           capsuleId: number,
           request: import("./request").ApiRequest<A>,
@@ -200,10 +243,13 @@ export class PooledScraperStrategy {
             errorTag: string,
           ) =>
             (error: StrategyError) =>
-              logDebugDecision("Session failed, rotating to next", {
-                session_id: capsuleId,
-                error_tag: errorTag,
-              }).pipe(
+              markSessionCooldown(capsuleId, errorTag).pipe(
+                Effect.andThen(
+                  logDebugDecision("Session failed, rotating to next", {
+                    session_id: capsuleId,
+                    error_tag: errorTag,
+                  }),
+                ),
                 Effect.flatMap(() =>
                   tryNextCapsule(request, remaining, error),
                 ),
@@ -241,6 +287,8 @@ export class PooledScraperStrategy {
             http,
             capsule!.rateLimiter,
             transport.name,
+            endpointCatalog,
+            discovery,
             config.strategy.retryLimit,
             config.requestTimeout,
           );
@@ -257,6 +305,7 @@ export class PooledScraperStrategy {
         ): Effect.Effect<A, StrategyError> =>
           Effect.gen(function* () {
             const capsules = yield* Ref.get(capsulesRef);
+            const cooldowns = yield* Ref.get(cooldownsRef);
 
             // Filter by auth capability
             const candidates: SessionCapsule[] = [];
@@ -282,6 +331,7 @@ export class PooledScraperStrategy {
             const sorted = yield* sortByRateLimitState(
               candidates,
               request.rateLimitBucket,
+              cooldowns,
             );
 
             return yield* tryNextCapsule(request, sorted);
@@ -293,6 +343,8 @@ export class PooledScraperStrategy {
 
         const snapshot = Ref.get(capsulesRef).pipe(
           Effect.flatMap((cs) =>
+            Ref.get(cooldownsRef).pipe(
+              Effect.flatMap((cooldowns) =>
             Effect.all(
               cs.map((c) =>
                 c.canHandleUserAuth().pipe(
@@ -300,9 +352,14 @@ export class PooledScraperStrategy {
                     (hasUserAuth): SessionSnapshot => ({
                       id: c.id,
                       hasUserAuth,
+                      ...(cooldowns[c.id] !== undefined
+                        ? { cooldownUntil: cooldowns[c.id] }
+                        : {}),
                     }),
                   ),
                 ),
+              ),
+            ),
               ),
             ),
           ),
@@ -313,7 +370,7 @@ export class PooledScraperStrategy {
           manager: { addSession, sessionCount, snapshot },
         } satisfies PooledInternals;
       }),
-    );
+    ).pipe(Layer.provideMerge(TwitterEndpointCatalog.liveLayer));
 
     const strategyLayer = Layer.effect(
       ScraperStrategy,

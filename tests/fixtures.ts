@@ -1334,38 +1334,40 @@ export const malformedTweetDetailFixture = {
 
 export const bookmarksPageOneFixture = {
   data: {
-    bookmark_timeline_v2: {
-      timeline: {
-        instructions: [
-          {
-            entries: [
-              tweetEntry({
-                id: "bookmark-tweet-1",
-                text: "First bookmarked tweet",
-                username: "bookmark_author",
-                name: "Bookmark Author",
-                userId: "7001",
-                createdAt: "Mon Jan 18 14:00:00 +0000 2010",
-                views: "42",
-              }),
-              tweetEntry({
-                id: "bookmark-tweet-2",
-                text: "Second bookmarked tweet",
-                username: "bookmark_author_two",
-                name: "Bookmark Author Two",
-                userId: "7002",
-                createdAt: "Mon Jan 18 14:05:00 +0000 2010",
-              }),
-              {
-                entryId: "cursor-bottom-bookmark-1",
-                content: {
-                  cursorType: "Bottom",
-                  value: "bookmark-cursor-1",
+    search_by_raw_query: {
+      bookmarks_search_timeline: {
+        timeline: {
+          instructions: [
+            {
+              entries: [
+                tweetEntry({
+                  id: "bookmark-tweet-1",
+                  text: "First bookmarked tweet",
+                  username: "bookmark_author",
+                  name: "Bookmark Author",
+                  userId: "7001",
+                  createdAt: "Mon Jan 18 14:00:00 +0000 2010",
+                  views: "42",
+                }),
+                tweetEntry({
+                  id: "bookmark-tweet-2",
+                  text: "Second bookmarked tweet",
+                  username: "bookmark_author_two",
+                  name: "Bookmark Author Two",
+                  userId: "7002",
+                  createdAt: "Mon Jan 18 14:05:00 +0000 2010",
+                }),
+                {
+                  entryId: "cursor-bottom-bookmark-1",
+                  content: {
+                    cursorType: "Bottom",
+                    value: "bookmark-cursor-1",
+                  },
                 },
-              },
-            ],
-          },
-        ],
+              ],
+            },
+          ],
+        },
       },
     },
   },
@@ -1373,22 +1375,24 @@ export const bookmarksPageOneFixture = {
 
 export const bookmarksPageTwoFixture = {
   data: {
-    bookmark_timeline_v2: {
-      timeline: {
-        instructions: [
-          {
-            entries: [
-              tweetEntry({
-                id: "bookmark-tweet-3",
-                text: "Third bookmarked tweet",
-                username: "bookmark_author_three",
-                name: "Bookmark Author Three",
-                userId: "7003",
-                createdAt: "Mon Jan 18 14:10:00 +0000 2010",
-              }),
-            ],
-          },
-        ],
+    search_by_raw_query: {
+      bookmarks_search_timeline: {
+        timeline: {
+          instructions: [
+            {
+              entries: [
+                tweetEntry({
+                  id: "bookmark-tweet-3",
+                  text: "Third bookmarked tweet",
+                  username: "bookmark_author_three",
+                  name: "Bookmark Author Three",
+                  userId: "7003",
+                  createdAt: "Mon Jan 18 14:10:00 +0000 2010",
+                }),
+              ],
+            },
+          ],
+        },
       },
     },
   },

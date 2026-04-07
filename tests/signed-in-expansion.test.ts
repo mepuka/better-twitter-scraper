@@ -10,6 +10,7 @@ import {
   TwitterHttpClient,
   TwitterPublic,
   TwitterSearch,
+  TwitterSessionState,
   TwitterTrends,
   TwitterTweets,
   UserAuth,
@@ -74,6 +75,7 @@ const trendsTestLayer = (
 ) =>
   TwitterTrends.layer.pipe(
     Layer.provideMerge(ScraperStrategy.standardLayer),
+    Layer.provideMerge(TwitterSessionState.liveLayer),
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
@@ -91,6 +93,7 @@ const mixedExpansionLayer = (
     TwitterTrends.layer,
   ).pipe(
     Layer.provideMerge(ScraperStrategy.standardLayer),
+    Layer.provideMerge(TwitterSessionState.liveLayer),
     Layer.provideMerge(GuestAuth.liveLayer),
     Layer.provideMerge(UserAuth.testLayer()),
     Layer.provideMerge(CookieManager.testLayer(initialCookies)),

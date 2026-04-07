@@ -40,6 +40,7 @@ export class TwitterDirectMessages extends ServiceMap.Service<
         readonly conversationId: string;
         readonly maxId: string | undefined;
         readonly remaining: number;
+        readonly seenMaxIds: ReadonlySet<string>;
       }
 
       const getConversation = (
@@ -53,6 +54,7 @@ export class TwitterDirectMessages extends ServiceMap.Service<
             conversationId,
             maxId: undefined,
             remaining,
+            seenMaxIds: new Set<string>(),
           },
           (state) => {
             if (state.remaining <= 0) {
@@ -70,11 +72,15 @@ export class TwitterDirectMessages extends ServiceMap.Service<
 
               const messages = page.messages.slice(0, state.remaining);
               const newRemaining = state.remaining - messages.length;
+              const duplicateMaxId =
+                page.minEntryId !== undefined &&
+                state.seenMaxIds.has(page.minEntryId);
 
               const atEnd =
                 messages.length === 0 ||
                 page.status === "AT_END" ||
-                !page.minEntryId;
+                !page.minEntryId ||
+                duplicateMaxId;
 
               const next =
                 atEnd || newRemaining <= 0
@@ -83,6 +89,7 @@ export class TwitterDirectMessages extends ServiceMap.Service<
                       conversationId: state.conversationId,
                       maxId: page.minEntryId,
                       remaining: newRemaining,
+                      seenMaxIds: new Set(state.seenMaxIds).add(page.minEntryId),
                     });
 
               return [messages, next] as const;

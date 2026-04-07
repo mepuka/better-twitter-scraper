@@ -1,18 +1,19 @@
 import { Effect, Layer } from "effect";
 import { it } from "@effect/vitest";
-import { describe, expect, afterEach } from "vitest";
+import { describe, expect } from "vitest";
 
 import { TwitterConfig, TwitterHttpClient } from "../index";
+import {
+  getFallbackQueryIds,
+  mergeKnownQueryIds,
+  resolveRequestQueryIds,
+} from "../src/endpoint-catalog";
 import {
   extractEndpointsFromBundle,
   extractScriptUrls,
   TwitterEndpointDiscovery,
 } from "../src/endpoint-discovery";
-import {
-  endpointRegistry,
-  getQueryIds,
-  updateQueryIds,
-} from "../src/endpoints";
+import { endpointRegistry } from "../src/endpoints";
 import type { HttpScript } from "../src/http";
 
 // ---------------------------------------------------------------------------
@@ -90,19 +91,9 @@ describe("extractEndpointsFromBundle", () => {
   });
 });
 
-describe("updateQueryIds / getQueryIds", () => {
-  // Save and restore original IDs between tests to avoid cross-test pollution
-  let originalIds: ReadonlyMap<string, string>;
-
-  afterEach(() => {
-    // The first test captures them; restore after each test
-    if (originalIds) {
-      updateQueryIds(originalIds);
-    }
-  });
-
+describe("mergeKnownQueryIds / resolveRequestQueryIds", () => {
   it("replaces known query IDs and ignores unknown ones", () => {
-    originalIds = getQueryIds();
+    const originalIds = getFallbackQueryIds();
 
     const discovered = new Map([
       ["UserByScreenName", "NEWID_UserByScreenName"],
@@ -110,24 +101,24 @@ describe("updateQueryIds / getQueryIds", () => {
       ["SomeUnknownEndpoint", "NEWID_Unknown"],
     ]);
 
-    updateQueryIds(discovered);
+    const ids = mergeKnownQueryIds(originalIds, discovered);
 
-    const ids = getQueryIds();
     expect(ids.get("UserByScreenName")).toBe("NEWID_UserByScreenName");
     expect(ids.get("TweetDetail")).toBe("NEWID_TweetDetail");
     expect(ids.has("SomeUnknownEndpoint")).toBe(false);
-    // Untouched IDs remain the same
     expect(ids.get("UserTweets")).toBe(originalIds.get("UserTweets"));
   });
 
   it("reflects updated IDs in endpointRegistry URLs", () => {
-    originalIds = getQueryIds();
-
-    updateQueryIds(
+    const ids = mergeKnownQueryIds(
+      getFallbackQueryIds(),
       new Map([["UserByScreenName", "REPLACED_HASH"]]),
     );
 
-    const request = endpointRegistry.userByScreenName("testuser");
+    const request = resolveRequestQueryIds(
+      endpointRegistry.userByScreenName("testuser"),
+      ids,
+    );
     expect(request.url).toContain("/graphql/REPLACED_HASH/UserByScreenName");
   });
 });

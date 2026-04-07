@@ -39,7 +39,6 @@ export const paginateTimeline = <T, E>(options: {
         const remaining = state.remaining - items.length;
 
         const next =
-          items.length === 0 ||
           !page.nextCursor ||
           page.status === "at_end" ||
           duplicateCursor ||

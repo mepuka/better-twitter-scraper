@@ -3,6 +3,10 @@ import * as Cookies from "effect/unstable/http/Cookies";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vitest";
 
+import {
+  mergeKnownQueryIds,
+  resolveRequestQueryIds,
+} from "../src/endpoint-catalog";
 import { HttpStatusError } from "../src/errors";
 import type { RequestAuthHelper } from "../src/request-auth";
 import type { ApiRequest } from "../src/request";
@@ -25,6 +29,11 @@ const noopRateLimiter = {
   noteRateLimit: () => Effect.void,
   noteResponse: () =>
     Effect.succeed({ incomingExhausted: false } as const),
+};
+
+const noopEndpointCatalog = {
+  resolveRequest: <A>(request: ApiRequest<A>) => Effect.succeed(request),
+  updateQueryIds: () => Effect.void,
 };
 
 /** Build a minimal RequestAuthHelper whose headersFor returns empty headers. */
@@ -95,6 +104,7 @@ const makeUserRequest = (overrides?: Partial<ApiRequest<string>>): ApiRequest<st
   authRequirement: "user",
   bearerToken: "default",
   rateLimitBucket: "userTweets",
+  graphqlOperationName: "UserTweets",
   method: "GET",
   url: "https://api.x.com/graphql/test/UserTweets",
   responseKind: "json",
@@ -128,6 +138,8 @@ describe("createStrategyExecute error propagation", () => {
       transport,
       noopRateLimiter,
       "scripted",
+      noopEndpointCatalog,
+      Option.none(),
       0,
     );
 
@@ -152,6 +164,8 @@ describe("createStrategyExecute error propagation", () => {
       transport,
       noopRateLimiter,
       "scripted",
+      noopEndpointCatalog,
+      Option.none(),
       0,
     );
 
@@ -175,12 +189,77 @@ describe("createStrategyExecute error propagation", () => {
       transport,
       noopRateLimiter,
       "scripted",
+      noopEndpointCatalog,
+      Option.none(),
       0,
     );
 
     return Effect.gen(function* () {
       const result = yield* extractError(execute(makeUserRequest()));
       expect(result._tag).toBe("RateLimitError");
+    });
+  });
+
+  it.effect("refreshes GraphQL query IDs once after an empty 404", () => {
+    let queryIds = new Map([["UserTweets", "stale-id"]]) as ReadonlyMap<string, string>;
+    const seenUrls: string[] = [];
+    const transport = {
+      execute: <A>(request: { readonly url: string }) => {
+        seenUrls.push(request.url);
+        return seenUrls.length === 1
+          ? Effect.fail(
+              new HttpStatusError({
+                endpointId: "UserTweets",
+                status: 404,
+                body: "",
+                headers: {},
+              }),
+            )
+          : Effect.succeed({
+              headers: {},
+              cookies: Cookies.empty,
+              body: { ok: true },
+            } as const);
+      },
+    };
+
+    const endpointCatalog = {
+      resolveRequest: <A>(request: ApiRequest<A>) =>
+        Effect.succeed(resolveRequestQueryIds(request, queryIds)),
+      updateQueryIds: (discovered: ReadonlyMap<string, string>) =>
+        Effect.sync(() => {
+          queryIds = mergeKnownQueryIds(queryIds, discovered);
+        }),
+    };
+
+    const execute = createStrategyExecute(
+      {
+        guest: Option.some(stubAuth("guest")),
+        user: Option.some(stubAuth("user")),
+      },
+      noopCookies,
+      transport,
+      noopRateLimiter,
+      "scripted",
+      endpointCatalog,
+      Option.some({
+        refreshQueryIds: () =>
+          Effect.succeed(new Map([["UserTweets", "fresh-id"]])),
+      }),
+      0,
+    );
+
+    return Effect.gen(function* () {
+      const result = yield* execute(
+        makeUserRequest({
+          url: "https://api.x.com/graphql/stale-id/UserTweets",
+        }),
+      );
+      expect(JSON.parse(result)).toEqual({ ok: true });
+      expect(seenUrls).toEqual([
+        "https://api.x.com/graphql/stale-id/UserTweets",
+        "https://api.x.com/graphql/fresh-id/UserTweets",
+      ]);
     });
   });
 

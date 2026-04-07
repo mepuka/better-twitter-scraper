@@ -19,6 +19,7 @@ import {
   parseBookmarksPageResponse,
   parseBookmarkMutationResponse,
 } from "./parsers";
+import { getFallbackQueryIds } from "./endpoint-catalog";
 import type { ApiRequest } from "./request";
 import type { TweetDetailDocument } from "./tweet-detail-model";
 
@@ -28,93 +29,12 @@ interface EndpointTemplate {
   readonly fieldToggles?: Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
-// Module-level mutable query-ID map
-//
-// This Map is initialized with hardcoded fallback IDs and mutated exactly once
-// during layer construction (in strategy.ts / pooled-strategy.ts) via
-// `updateQueryIds()` after endpoint auto-discovery.
-//
-// Why module-level state instead of a Ref-based service?
-// Every service file (tweets.ts, public.ts, etc.) imports `endpointRegistry`
-// at the module level, and the registry methods close over `graphqlBaseUrl`
-// which reads this map. Threading a Ref through every service would be a
-// large refactor with minimal safety gain — the mutation window is tiny
-// (single synchronous call during init), and discovered IDs are globally
-// correct across runtimes.
-//
-// `updateQueryIds` and `getQueryIds` are intentionally NOT re-exported from
-// the public API (index.ts) to prevent consumers from mutating the map.
-// ---------------------------------------------------------------------------
+const defaultQueryIds = getFallbackQueryIds();
 
-const queryIds = new Map<string, string>([
-  ["UserByScreenName", "AWbeRIdkLtqTRN7yL_H8yw"],
-  ["UserTweets", "N2tFDY-MlrLxXJ9F_ZxJGA"],
-  ["ListLatestTweetsTimeline", "Uv3buKIUElzL3Iuc0L0O5g"],
-  ["SearchTimeline", "ML-n2SfAxx5S_9QMqNejbg"],
-  ["UserTweetsAndReplies", "2NDLUdBmT_IB5uGwZ3tHRg"],
-  ["Likes", "Pcw-j9lrSeDMmkgnIejJiQ"],
-  ["Followers", "P7m4Qr-rJEB8KUluOenU6A"],
-  ["Following", "T5wihsMTYHncY7BB4YxHSg"],
-  ["TweetDetail", "YCNdW_ZytXfV9YR3cJK9kw"],
-  ["HomeTimeline", "HJFjzBgCs16TqxewQOeLNg"],
-  ["TweetResultByRestId", "4PdbzTmQ5PTjz9RiureISQ"],
-  ["CommunityTweetsTimeline", "BnowIPH1W7RDwY3EkUgneg"],
-  ["Bookmarks", "RV1g3b8n_SGOHwkqKYSCFw"],
-  // Defensive alias: if X renames the bookmarks operation back to
-  // BookmarkSearchTimeline, discovery will capture the new ID here.
-  // The bookmarks endpoint always uses the "Bookmarks" key; see
-  // syncBookmarkQueryId() below.
-  ["BookmarkSearchTimeline", "RV1g3b8n_SGOHwkqKYSCFw"],
-  ["DeleteBookmark", "Wlmlj2-xzyS1GN3a6cj-mQ"],
-]);
-
-/**
- * Replace active query IDs with freshly discovered values.
- *
- * Only updates entries whose operation name already exists in the map
- * so that we don't accidentally add unknown endpoints.
- *
- * **Internal only** — not re-exported from the public API. Called exactly once
- * during layer construction in `strategy.ts` / `pooled-strategy.ts`.
- */
-export const updateQueryIds = (discovered: ReadonlyMap<string, string>) => {
-  for (const [name, id] of discovered) {
-    if (queryIds.has(name)) {
-      queryIds.set(name, id);
-    }
-  }
-  syncBookmarkQueryId();
-};
-
-/**
- * Keep the "Bookmarks" key in sync with "BookmarkSearchTimeline".
- *
- * Discovery may find the bookmarks operation under either name depending
- * on the current X client-web bundle. The endpoint function always looks
- * up "Bookmarks", so if only "BookmarkSearchTimeline" was refreshed we
- * copy its ID across.
- */
-const syncBookmarkQueryId = () => {
-  const primary = queryIds.get("Bookmarks")!;
-  const alias = queryIds.get("BookmarkSearchTimeline")!;
-  // If the alias was updated by discovery (differs from the initial
-  // fallback), propagate it to the primary key.
-  if (alias !== primary) {
-    queryIds.set("Bookmarks", alias);
-  }
-};
-
-/**
- * Read-only snapshot of the current query-ID map (useful for testing/logging).
- *
- * **Internal only** — not re-exported from the public API.
- */
-export const getQueryIds = (): ReadonlyMap<string, string> => new Map(queryIds);
-
-/** Builds the base GraphQL URL by looking up the query ID from the module-level map. */
-const graphqlBaseUrl = (operationName: string) =>
-  `https://api.x.com/graphql/${queryIds.get(operationName)}/${operationName}`;
+const graphqlBaseUrl = (
+  operationName: string,
+  queryIds: ReadonlyMap<string, string> = defaultQueryIds,
+) => `https://api.x.com/graphql/${queryIds.get(operationName)}/${operationName}`;
 
 const authenticatedProfilesTimelineFeatures = {
   rweb_video_screen_enabled: false,
@@ -139,7 +59,8 @@ const authenticatedProfilesTimelineFeatures = {
   view_counts_everywhere_api_enabled: true,
   longform_notetweets_consumption_enabled: true,
   responsive_web_twitter_article_tweet_consumption_enabled: true,
-  tweet_awards_web_tipping_enabled: false,
+  content_disclosure_indicator_enabled: true,
+  content_disclosure_ai_generated_indicator_enabled: true,
   responsive_web_grok_show_grok_translated_post: true,
   responsive_web_grok_analysis_button_from_backend: true,
   post_ctas_fetch_enabled: true,
@@ -211,7 +132,8 @@ const endpointTemplates = {
       view_counts_everywhere_api_enabled: true,
       longform_notetweets_consumption_enabled: true,
       responsive_web_twitter_article_tweet_consumption_enabled: true,
-      tweet_awards_web_tipping_enabled: false,
+      content_disclosure_indicator_enabled: true,
+      content_disclosure_ai_generated_indicator_enabled: true,
       responsive_web_grok_show_grok_translated_post: true,
       responsive_web_grok_analysis_button_from_backend: true,
       post_ctas_fetch_enabled: true,
@@ -284,16 +206,11 @@ const endpointTemplates = {
   },
   bookmarks: {
     variables: {
+      rawQuery:
+        "lang:en OR lang:und OR lang:es OR lang:fr OR lang:de OR lang:ja OR lang:ko OR lang:zh OR lang:ar OR lang:pt OR lang:it OR lang:nl OR lang:ru OR lang:tr OR lang:pl OR lang:hi",
       count: 20,
-      includePromotedContent: false,
-      withDownvotePerspective: false,
-      withReactionsMetadata: false,
-      withReactionsPerspective: false,
     },
-    features: {
-      ...authenticatedProfilesTimelineFeatures,
-      graphql_timeline_v2_bookmark_timeline: true,
-    },
+    features: authenticatedProfilesTimelineFeatures,
   },
   followers: {
     variables: {
@@ -521,6 +438,7 @@ const buildUrl = (
     readonly features?: Record<string, unknown>;
     readonly variables?: Record<string, unknown>;
   } = {},
+  queryIds: ReadonlyMap<string, string> = defaultQueryIds,
 ) => {
   const params = new URLSearchParams();
 
@@ -540,7 +458,7 @@ const buildUrl = (
     params.set("fieldToggles", stableJson(fieldToggles));
   }
 
-  return `${graphqlBaseUrl(operationName)}?${params.toString()}`;
+  return `${graphqlBaseUrl(operationName, queryIds)}?${params.toString()}`;
 };
 
 export const endpointRegistry = {
@@ -569,6 +487,7 @@ export const endpointRegistry = {
       authRequirement: "guest",
       bearerToken: "secondary",
       rateLimitBucket: "profileLookup",
+      graphqlOperationName: "UserByScreenName",
       method: "GET",
       url: buildUrl("UserByScreenName", endpointTemplates.userByScreenName, {
         variables: {
@@ -593,6 +512,7 @@ export const endpointRegistry = {
       authRequirement: "guest",
       bearerToken: "secondary",
       rateLimitBucket: "userTweets",
+      graphqlOperationName: "UserTweets",
       method: "GET",
       url: buildUrl("UserTweets", endpointTemplates.userTweets, {
         variables: {
@@ -619,6 +539,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "listTweets",
+      graphqlOperationName: "ListLatestTweetsTimeline",
       method: "GET",
       url: buildUrl("ListLatestTweetsTimeline", endpointTemplates.listTweets, {
         variables: {
@@ -644,6 +565,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "communityTweets",
+      graphqlOperationName: "CommunityTweetsTimeline",
       method: "GET",
       url: buildUrl("CommunityTweetsTimeline", endpointTemplates.communityTweets, {
         variables: {
@@ -669,6 +591,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "searchProfiles",
+      graphqlOperationName: "SearchTimeline",
       method: "GET",
       url: buildUrl("SearchTimeline", endpointTemplates.searchTimeline, {
         variables: {
@@ -696,6 +619,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "searchTweets",
+      graphqlOperationName: "SearchTimeline",
       method: "GET",
       url: buildUrl("SearchTimeline", endpointTemplates.searchTimeline, {
         variables: {
@@ -722,6 +646,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "followers",
+      graphqlOperationName: "Followers",
       method: "GET",
       url: buildUrl("Followers", endpointTemplates.followers, {
         variables: {
@@ -747,6 +672,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "following",
+      graphqlOperationName: "Following",
       method: "GET",
       url: buildUrl("Following", endpointTemplates.following, {
         variables: {
@@ -772,6 +698,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "tweetsAndReplies",
+      graphqlOperationName: "UserTweetsAndReplies",
       method: "GET",
       url: buildUrl("UserTweetsAndReplies", endpointTemplates.userTweetsAndReplies, {
         variables: {
@@ -799,6 +726,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "likedTweets",
+      graphqlOperationName: "Likes",
       method: "GET",
       url: buildUrl("Likes", endpointTemplates.likes, {
         variables: {
@@ -824,6 +752,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "homeTimeline",
+      graphqlOperationName: "HomeTimeline",
       method: "GET",
       url: buildUrl("HomeTimeline", endpointTemplates.homeTimeline, {
         variables: {
@@ -844,6 +773,7 @@ export const endpointRegistry = {
       authRequirement: "guest",
       bearerToken: "secondary",
       rateLimitBucket: "tweetResultByRestId",
+      graphqlOperationName: "TweetResultByRestId",
       method: "GET",
       url: buildUrl("TweetResultByRestId", endpointTemplates.tweetResultByRestId, {
         variables: {
@@ -863,6 +793,7 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "tweetDetail",
+      graphqlOperationName: "TweetDetail",
       method: "GET",
       url: buildUrl("TweetDetail", endpointTemplates.tweetDetail, {
         variables: {
@@ -930,8 +861,9 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "bookmarks",
+      graphqlOperationName: "BookmarkSearchTimeline",
       method: "GET",
-      url: buildUrl("Bookmarks", endpointTemplates.bookmarks, {
+      url: buildUrl("BookmarkSearchTimeline", endpointTemplates.bookmarks, {
         variables: {
           ...endpointTemplates.bookmarks.variables,
           count: bookmarksCount(count),
@@ -950,13 +882,15 @@ export const endpointRegistry = {
       authRequirement: "user",
       bearerToken: "secondary",
       rateLimitBucket: "bookmarks",
+      graphqlOperationName: "DeleteBookmark",
+      queryIdInBody: true,
       method: "POST",
       url: graphqlBaseUrl("DeleteBookmark"),
       body: {
         _tag: "json",
         value: {
           variables: { tweet_id: tweetId },
-          queryId: queryIds.get("DeleteBookmark"),
+          queryId: defaultQueryIds.get("DeleteBookmark"),
         },
       },
       responseKind: "json",

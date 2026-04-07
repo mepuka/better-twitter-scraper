@@ -1,15 +1,16 @@
-import { Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vitest";
+import * as Cookies from "effect/unstable/http/Cookies";
 
 import { TwitterConfig } from "../src/config";
 import type { SerializedCookie } from "../src/cookies";
-import { AuthenticationError } from "../src/errors";
+import { AuthenticationError, HttpStatusError } from "../src/errors";
 import {
   PooledScraperStrategy,
   SessionPoolManager,
 } from "../src/pooled-strategy";
-import type { ApiRequest } from "../src/request";
+import type { ApiRequest, PreparedApiRequest } from "../src/request";
 import { ScraperStrategy, type StrategyError } from "../src/strategy";
 import { TwitterTransactionId } from "../src/transaction-id";
 import { transportMetadataLayer } from "../src/observability";
@@ -74,6 +75,29 @@ const makePoolLayer = (
   PooledScraperStrategy.layer(initialSessions).pipe(
     Layer.provideMerge(TwitterHttpClient.scriptedLayer(script)),
     Layer.provideMerge(baseDeps),
+  );
+
+const makePoolLayerWithHandler = (
+  handler: (
+    request: PreparedApiRequest<unknown>,
+  ) => Effect.Effect<
+    {
+      readonly headers: Readonly<Record<string, string>>;
+      readonly cookies: Cookies.Cookies;
+      readonly body: string | unknown;
+    },
+    HttpStatusError
+  >,
+  initialSessions: ReadonlyArray<ReadonlyArray<SerializedCookie>> = [],
+  deps = baseDeps,
+) =>
+  PooledScraperStrategy.layer(initialSessions).pipe(
+    Layer.provideMerge(
+      Layer.succeed(TwitterHttpClient, {
+        execute: handler,
+      }),
+    ),
+    Layer.provideMerge(deps),
   );
 
 // ---------------------------------------------------------------------------
@@ -267,6 +291,114 @@ describe("PooledScraperStrategy", () => {
           ),
         ),
       ),
+  );
+
+  it.effect(
+    "failed sessions stay on cooldown for the next request",
+    () => {
+      const seenSessions: string[] = [];
+      let sessionAFailed = false;
+      let sessionBSuccesses = 0;
+      const succeed = (
+        data: string,
+      ): Effect.Effect<
+        {
+          readonly headers: Readonly<Record<string, string>>;
+          readonly cookies: Cookies.Cookies;
+          readonly body: string | unknown;
+        },
+        HttpStatusError
+      > =>
+        Effect.succeed({
+          headers: {},
+          cookies: Cookies.empty,
+          body: { data },
+        });
+      const handler = (
+        request: PreparedApiRequest<unknown>,
+      ): Effect.Effect<
+        {
+          readonly headers: Readonly<Record<string, string>>;
+          readonly cookies: Cookies.Cookies;
+          readonly body: string | unknown;
+        },
+        HttpStatusError
+      > =>
+        Effect.suspend(() => {
+          const cookie = request.headers.cookie ?? "";
+
+          if (cookie.includes("auth-a")) {
+            seenSessions.push("a");
+
+            if (!sessionAFailed) {
+              sessionAFailed = true;
+              return Effect.fail(
+                new HttpStatusError({
+                  endpointId: request.endpointId,
+                  status: 399,
+                  body: "",
+                  headers: {},
+                }),
+              );
+            }
+
+            return succeed("unexpected-a");
+          }
+
+          if (cookie.includes("auth-b")) {
+            seenSessions.push("b");
+            sessionBSuccesses += 1;
+            return succeed(
+              sessionBSuccesses === 1
+                ? "recovered-from-b"
+                : "second-from-b",
+            );
+          }
+
+          return Effect.fail(
+            new HttpStatusError({
+              endpointId: request.endpointId,
+              status: 500,
+              body: "missing session cookies",
+              headers: {},
+            }),
+          );
+        });
+
+      return Effect.gen(function* () {
+        const strategy = yield* ScraperStrategy;
+        const manager = yield* SessionPoolManager;
+
+        const resultOne = yield* strategy.execute(makeUserRequest());
+        expect(JSON.parse(resultOne)).toEqual({ data: "recovered-from-b" });
+
+        const resultTwo = yield* strategy.execute(makeUserRequest());
+        expect(JSON.parse(resultTwo)).toEqual({ data: "second-from-b" });
+
+        const snapshot = yield* manager.snapshot;
+
+        expect(seenSessions).toEqual(["a", "b", "b"]);
+        expect(snapshot[0]?.cooldownUntil).toEqual(expect.any(Number));
+        expect(snapshot[1]?.cooldownUntil).toBeUndefined();
+      }).pipe(
+        Effect.provide(
+          makePoolLayerWithHandler(
+            handler,
+            [userCookies("a"), userCookies("b")],
+            Layer.mergeAll(
+              TwitterConfig.testLayer({
+                strategy: {
+                  retryLimit: 0,
+                  sessionFailureCooldown: Duration.minutes(10),
+                },
+              }),
+              TwitterTransactionId.testLayer(),
+              transportMetadataLayer("scripted"),
+            ),
+          ),
+        ),
+      );
+    },
   );
 
   it.effect(

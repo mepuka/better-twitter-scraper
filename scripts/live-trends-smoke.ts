@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import {
   CookieManager,
   ScraperStrategy,
+  TwitterSessionState,
   TwitterConfig,
   TwitterHttpClient,
   TwitterTrends,
@@ -13,6 +14,7 @@ import { ObservabilityCapture } from "../src/observability-capture";
 
 const liveLayer = TwitterTrends.layer.pipe(
   Layer.provideMerge(ScraperStrategy.standardLayer),
+  Layer.provideMerge(TwitterSessionState.liveLayer),
   Layer.provideMerge(UserAuth.liveLayer),
   Layer.provideMerge(CookieManager.liveLayer),
   Layer.provideMerge(TwitterHttpClient.cycleTlsLayer()),

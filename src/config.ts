@@ -34,6 +34,7 @@ export interface TwitterConfigShape {
   };
   readonly strategy: {
     readonly retryLimit: number;
+    readonly sessionFailureCooldown: Duration.Duration;
   };
 }
 
@@ -81,6 +82,8 @@ const makeConfig = (
   },
   strategy: {
     retryLimit: overrides.strategy?.retryLimit ?? 1,
+    sessionFailureCooldown:
+      overrides.strategy?.sessionFailureCooldown ?? Duration.minutes(1),
   },
 });
 
@@ -129,6 +132,9 @@ export class TwitterConfig extends ServiceMap.Service<
         const strategyRetryLimit = yield* Config.number(
           "TWITTER_STRATEGY_RETRY_LIMIT",
         ).pipe(Config.withDefault(1));
+        const strategySessionFailureCooldownMs = yield* Config.number(
+          "TWITTER_STRATEGY_SESSION_FAILURE_COOLDOWN_MS",
+        ).pipe(Config.withDefault(60_000));
         const proxyUrl = yield* Config.option(Config.string("TWITTER_PROXY_URL"));
 
         return makeConfig({
@@ -157,6 +163,9 @@ export class TwitterConfig extends ServiceMap.Service<
           },
           strategy: {
             retryLimit: strategyRetryLimit,
+            sessionFailureCooldown: Duration.millis(
+              strategySessionFailureCooldownMs,
+            ),
           },
         });
       }),

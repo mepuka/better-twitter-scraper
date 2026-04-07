@@ -1,4 +1,13 @@
-import { Clock, Duration, Effect, Layer, Option, Ref, ServiceMap } from "effect";
+import {
+  Clock,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Ref,
+  ServiceMap,
+} from "effect";
 
 import { CookieManager, type CookieStoreInstance } from "./cookies";
 import { TwitterConfig, type TwitterConfigShape } from "./config";
@@ -39,6 +48,11 @@ export type GuestAuthInstances = {
   readonly guestRequestAuth: RequestAuthHelper;
 };
 
+type GuestActivationWaiter = Deferred.Deferred<
+  string,
+  GuestTokenError | HttpStatusError | InvalidResponseError | TransportError
+>;
+
 export const createGuestAuthInstances = (deps: {
   readonly config: TwitterConfigShape;
   readonly cookies: CookieStoreInstance;
@@ -57,6 +71,7 @@ export const createGuestAuthInstances = (deps: {
     const { config, cookies, execute } = deps;
     const tokenRef = yield* Ref.make(Option.none<string>());
     const authenticatedAtRef = yield* Ref.make(Option.none<number>());
+    const activationRef = yield* Ref.make(Option.none<GuestActivationWaiter>());
 
     const invalidate = Effect.gen(function* () {
       yield* Ref.set(tokenRef, Option.none<string>());
@@ -112,7 +127,43 @@ export const createGuestAuthInstances = (deps: {
           return existingToken.value;
         }
 
-        return yield* activate();
+        const deferred = yield* Deferred.make<
+          string,
+          GuestTokenError | HttpStatusError | InvalidResponseError | TransportError
+        >();
+        const inFlight: {
+          readonly deferred: GuestActivationWaiter;
+          readonly shouldActivate: boolean;
+        } = yield* Ref.modify(activationRef, (current) => {
+          if (Option.isSome(current)) {
+            return [
+              {
+                deferred: current.value,
+                shouldActivate: false as boolean,
+              },
+              current,
+            ] as const;
+          }
+
+          return [
+            {
+              deferred,
+              shouldActivate: true as boolean,
+            },
+            Option.some(deferred),
+          ] as const;
+        });
+
+        if (inFlight.shouldActivate) {
+          yield* Deferred.complete(
+            inFlight.deferred,
+            activate().pipe(
+              Effect.ensuring(Ref.set(activationRef, Option.none())),
+            ),
+          );
+        }
+
+        return yield* Deferred.await(inFlight.deferred);
       }),
     );
 

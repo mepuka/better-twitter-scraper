@@ -58,6 +58,24 @@ describe("paginateTimeline", () => {
     });
   });
 
+  it.effect("continues past an empty page when a fresh cursor is present", () => {
+    const pages: TimelinePage<string>[] = [
+      { items: [], nextCursor: "c1", status: "has_more" },
+      { items: ["a"], status: "at_end" },
+    ];
+    let call = 0;
+
+    const stream = paginateTimeline({
+      remaining: 10,
+      fetchPage: () => Effect.succeed(pages[call++]!),
+    });
+
+    return Effect.gen(function* () {
+      const result = yield* Stream.runCollect(stream);
+      expect([...result]).toEqual(["a"]);
+    });
+  });
+
   it.effect("returns empty stream when remaining is zero", () => {
     const stream = paginateTimeline({
       remaining: 0,

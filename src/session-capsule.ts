@@ -17,6 +17,7 @@ import { createGuestAuthInstances } from "./guest-auth";
 import { createRateLimiterInstance, type RateLimiterInstance } from "./rate-limiter";
 import type { PreparedApiRequest } from "./request";
 import type { RequestAuthHelper } from "./request-auth";
+import { createTransactionIdInstance } from "./transaction-id";
 import { createUserRequestAuthInstance } from "./user-auth";
 import { createXpffInstance } from "./xpff";
 
@@ -34,7 +35,7 @@ export const createSessionCapsule = (
   serializedCookies: ReadonlyArray<SerializedCookie>,
   shared: {
     readonly config: TwitterConfigShape;
-    readonly transactionId: {
+    readonly transactionIdOverride?: {
       readonly headerFor: (
         request: { readonly method: string; readonly url: string },
       ) => Effect.Effect<Readonly<Record<string, string>>, any>;
@@ -73,11 +74,18 @@ export const createSessionCapsule = (
       execute: shared.http.execute,
     });
 
-    // 6. User request auth
+    // 6. Session-scoped transaction IDs and user request auth
+    const transactionId = shared.transactionIdOverride
+      ? shared.transactionIdOverride
+      : yield* createTransactionIdInstance({
+          config: shared.config,
+          http: shared.http,
+          cookies,
+        });
     const user = yield* createUserRequestAuthInstance({
       cookies,
       config: shared.config,
-      transactionId: shared.transactionId,
+      transactionId,
       xpff,
     });
 

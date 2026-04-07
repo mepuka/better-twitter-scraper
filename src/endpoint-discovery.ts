@@ -137,10 +137,15 @@ export class TwitterEndpointDiscovery extends ServiceMap.Service<
       ReadonlyMap<string, string>,
       EndpointDiscoveryError
     >;
+    readonly refreshQueryIds: () => Effect.Effect<
+      ReadonlyMap<string, string>,
+      EndpointDiscoveryError
+    >;
   }
 >()("@better-twitter-scraper/TwitterEndpointDiscovery") {
   static readonly disabledLayer = Layer.succeed(TwitterEndpointDiscovery, {
     discoverQueryIds: () => Effect.succeed(new Map()),
+    refreshQueryIds: () => Effect.succeed(new Map()),
   });
 
   static testLayer(
@@ -148,6 +153,7 @@ export class TwitterEndpointDiscovery extends ServiceMap.Service<
   ) {
     return Layer.succeed(TwitterEndpointDiscovery, {
       discoverQueryIds: () => Effect.succeed(queryIds),
+      refreshQueryIds: () => Effect.succeed(queryIds),
     });
   }
 
@@ -229,7 +235,13 @@ export class TwitterEndpointDiscovery extends ServiceMap.Service<
         return yield* Cache.get(queryIdCache, 0);
       });
 
-      return { discoverQueryIds };
+      const refreshQueryIds = Effect.fn(
+        "TwitterEndpointDiscovery.refreshQueryIds",
+      )(function* () {
+        return yield* loadQueryIds();
+      });
+
+      return { discoverQueryIds, refreshQueryIds };
     }),
   );
 }
