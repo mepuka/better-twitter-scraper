@@ -135,13 +135,30 @@ export class TwitterScraper {
         : {}),
     });
 
+    // Dependency tiers:
+    //   T0 (leaves):  Config, HttpClient, CookieManager
+    //   T1 (state):   SessionState(Cookie) — not needed by guestServices but
+    //                 included for ScraperStrategy's cache-key derivation
+    //   T2 (auth):    GuestAuth(Config+Cookie+Http)
+    //   T3 (strategy): ScraperStrategy(all above)
+    //   T4 (domain):  guestServicesLayer(Strategy)
+    const tier0 = Layer.mergeAll(
+      configLayer,
+      TwitterHttpClient.cycleTlsLayer(options?.proxyUrl),
+      CookieManager.liveLayer,
+    );
+    const tier1 = TwitterSessionState.liveLayer.pipe(
+      Layer.provideMerge(tier0),
+    );
+    const tier2 = GuestAuth.liveLayer.pipe(
+      Layer.provideMerge(tier1),
+    );
+    const tier3 = ScraperStrategy.standardLayer.pipe(
+      Layer.provideMerge(tier2),
+    );
+
     return guestServicesLayer.pipe(
-      Layer.provideMerge(ScraperStrategy.standardLayer),
-      Layer.provideMerge(GuestAuth.liveLayer),
-      Layer.provideMerge(CookieManager.liveLayer),
-      Layer.provideMerge(TwitterSessionState.liveLayer),
-      Layer.provideMerge(TwitterHttpClient.cycleTlsLayer(options?.proxyUrl)),
-      Layer.provideMerge(configLayer),
+      Layer.provideMerge(tier3),
     );
   }
 
@@ -202,15 +219,31 @@ export class TwitterScraper {
         : {}),
     });
 
+    // Dependency tiers (bottom-up):
+    //   T0 (leaves):  Config, HttpClient, CookieManager
+    //   T1 (infra):   EndpointDiscovery(Http+Config), SessionState(Cookie)
+    //   T2 (auth):    GuestAuth(Config+Cookie+Http), UserAuth(Cookie+Config)
+    //   T3 (strategy): ScraperStrategy(all above)
+    //   T4 (domain):  authenticatedServicesLayer(Strategy+SessionState)
+    const tier0 = Layer.mergeAll(
+      configLayer,
+      TwitterHttpClient.cycleTlsLayer(options?.proxyUrl),
+      CookieManager.liveLayer,
+    );
+    const tier1 = Layer.mergeAll(
+      TwitterEndpointDiscovery.liveLayer,
+      TwitterSessionState.liveLayer,
+    ).pipe(Layer.provideMerge(tier0));
+    const tier2 = Layer.mergeAll(
+      GuestAuth.liveLayer,
+      UserAuth.liveLayer,
+    ).pipe(Layer.provideMerge(tier1));
+    const tier3 = ScraperStrategy.standardLayer.pipe(
+      Layer.provideMerge(tier2),
+    );
+
     return authenticatedServicesLayer.pipe(
-      Layer.provideMerge(ScraperStrategy.standardLayer),
-      Layer.provideMerge(GuestAuth.liveLayer),
-      Layer.provideMerge(UserAuth.liveLayer),
-      Layer.provideMerge(CookieManager.liveLayer),
-      Layer.provideMerge(TwitterSessionState.liveLayer),
-      Layer.provideMerge(TwitterEndpointDiscovery.liveLayer),
-      Layer.provideMerge(TwitterHttpClient.cycleTlsLayer(options?.proxyUrl)),
-      Layer.provideMerge(configLayer),
+      Layer.provideMerge(tier3),
     );
   }
 
@@ -229,14 +262,32 @@ export class TwitterScraper {
    * - TWITTER_PAGINATION_JITTER_MS (default: 500)
    */
   static authenticatedLayerFromEnv() {
+    // Dependency tiers — same structure as authenticatedLayer but
+    // using env-based config and CycleTLS that reads proxy from config.
+    const tier0 = Layer.mergeAll(
+      TwitterConfig.fromEnvLayer,
+      CookieManager.liveLayer,
+    );
+    // cycleTlsLayerFromConfig needs TwitterConfig via Layer.unwrap,
+    // so it sits in tier0.5 — it's a leaf from the perspective of
+    // everything above, but needs Config.
+    const tier0Http = cycleTlsLayerFromConfig.pipe(
+      Layer.provideMerge(tier0),
+    );
+    const tier1 = Layer.mergeAll(
+      TwitterEndpointDiscovery.liveLayer,
+      TwitterSessionState.liveLayer,
+    ).pipe(Layer.provideMerge(tier0Http));
+    const tier2 = Layer.mergeAll(
+      GuestAuth.liveLayer,
+      UserAuth.liveLayer,
+    ).pipe(Layer.provideMerge(tier1));
+    const tier3 = ScraperStrategy.standardLayer.pipe(
+      Layer.provideMerge(tier2),
+    );
+
     return authenticatedServicesLayer.pipe(
-      Layer.provideMerge(ScraperStrategy.standardLayer),
-      Layer.provideMerge(GuestAuth.liveLayer),
-      Layer.provideMerge(UserAuth.liveLayer),
-      Layer.provideMerge(CookieManager.liveLayer),
-      Layer.provideMerge(TwitterEndpointDiscovery.liveLayer),
-      Layer.provideMerge(cycleTlsLayerFromConfig),
-      Layer.provideMerge(TwitterConfig.fromEnvLayer),
+      Layer.provideMerge(tier3),
     );
   }
 
@@ -308,12 +359,31 @@ export class TwitterScraper {
         : {}),
     });
 
+    // Dependency tiers:
+    //   T0 (leaves):  Config, HttpClient, SignedInSessionRevision
+    //   T1 (infra):   EndpointDiscovery(Http+Config)
+    //   T2 (pool):    PooledScraperStrategy(Config+Http+Discovery) -> outputs ScraperStrategy + SessionPoolManager
+    //   T3 (state):   TwitterSessionState.pooledLayer(SessionPoolManager)
+    //   T4 (domain):  pooledServicesLayer(Strategy+SessionState)
+    const tier0 = Layer.mergeAll(
+      configLayer,
+      TwitterHttpClient.cycleTlsLayer(options?.proxyUrl),
+    );
+    const tier1 = TwitterEndpointDiscovery.liveLayer.pipe(
+      Layer.provideMerge(tier0),
+    );
+    // PooledScraperStrategy outputs both ScraperStrategy and SessionPoolManager.
+    // SessionPoolManager must be visible to TwitterSessionState.pooledLayer.
+    const tier2 = PooledScraperStrategy.layer(initialSessions).pipe(
+      Layer.provideMerge(tier1),
+    );
+    // TwitterSessionState.pooledLayer needs SessionPoolManager from tier2.
+    const tier3 = TwitterSessionState.pooledLayer.pipe(
+      Layer.provideMerge(tier2),
+    );
+
     return pooledServicesLayer.pipe(
-      Layer.provideMerge(PooledScraperStrategy.layer(initialSessions)),
-      Layer.provideMerge(TwitterSessionState.pooledLayer),
-      Layer.provideMerge(TwitterEndpointDiscovery.liveLayer),
-      Layer.provideMerge(TwitterHttpClient.cycleTlsLayer(options?.proxyUrl)),
-      Layer.provideMerge(configLayer),
+      Layer.provideMerge(tier3),
       Layer.provide(SignedInSessionRevision.liveLayer),
     );
   }
