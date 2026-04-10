@@ -33,7 +33,7 @@
     "test:live": "RUN_LIVE_TWITTER_SMOKE=1 RUN_LIVE_TWITTER_AUTH_SMOKE=1 vitest run tests/live-smoke.test.ts"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-beta.35"
+    "effect": ">=4.0.0-beta.43"
   },
   "dependencies": {
     "cycletls": "^2.0.5",
@@ -42,9 +42,9 @@
   },
   "devDependencies": {
     "@effect/language-service": "^0.80.0",
-    "@effect/vitest": "4.0.0-beta.35",
+    "@effect/vitest": "4.0.0-beta.43",
     "@types/bun": "latest",
-    "effect": "^4.0.0-beta.35",
+    "effect": "4.0.0-beta.43",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   },
