@@ -261,6 +261,18 @@ const parseTweetCandidate = (
   const { timeParsed, timestamp } = parseTimestamp(legacy.created_at);
   const viewsText = result?.views?.count;
   const views = viewsText ? Number.parseInt(viewsText, 10) : undefined;
+  const quotedTweet = result?.quoted_status_result?.result
+    ? parseTweet(
+        { tweet_results: { result: result.quoted_status_result.result } },
+        `quoted-${id}`,
+      )
+    : undefined;
+  const retweetedTweet = legacy.retweeted_status_result?.result
+    ? parseTweet(
+        { tweet_results: { result: legacy.retweeted_status_result.result } },
+        `retweet-${id}`,
+      )
+    : undefined;
 
   const { photos, videos, sensitiveContent } = parseMediaGroups(
     legacy.extended_entities?.media ?? [],
@@ -378,22 +390,8 @@ const parseTweetCandidate = (
       ...(legacy.retweeted_status_id_str
         ? { retweetedTweetId: legacy.retweeted_status_id_str }
         : {}),
-      ...(result?.quoted_status_result?.result
-        ? {
-            quotedTweet: parseTweet(
-              { tweet_results: { result: result.quoted_status_result.result } },
-              `quoted-${id}`,
-            ),
-          }
-        : {}),
-      ...(legacy.retweeted_status_result?.result
-        ? {
-            retweetedTweet: parseTweet(
-              { tweet_results: { result: legacy.retweeted_status_result.result } },
-              `retweet-${id}`,
-            ),
-          }
-        : {}),
+      ...(quotedTweet ? { quotedTweet } : {}),
+      ...(retweetedTweet ? { retweetedTweet } : {}),
     }),
   };
 };

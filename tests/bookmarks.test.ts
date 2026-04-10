@@ -95,6 +95,55 @@ describe("Bookmarks parser", () => {
     expect(page.status).toBe("at_end");
   });
 
+  it("ignores tombstoned quoted and retweeted tweets when parsing bookmarks", () => {
+    const fixture = structuredClone(bookmarksPageOneFixture) as any;
+    const entries =
+      fixture.data.search_by_raw_query.bookmarks_search_timeline.timeline.instructions[0]
+        .entries;
+    const quotedParent = entries[0].content.itemContent.tweet_results.result;
+    const retweetParent = entries[1].content.itemContent.tweet_results.result;
+
+    quotedParent.quoted_status_result = {
+      result: {
+        __typename: "TweetTombstone",
+        rest_id: "deleted-quoted-tweet",
+      },
+    };
+    quotedParent.legacy.quoted_status_id_str = "deleted-quoted-tweet";
+
+    retweetParent.legacy.retweeted_status_result = {
+      result: {
+        __typename: "TweetTombstone",
+        rest_id: "deleted-retweeted-tweet",
+      },
+    };
+    retweetParent.legacy.retweeted_status_id_str = "deleted-retweeted-tweet";
+
+    const page = parseBookmarksPageResponse(fixture);
+    const [firstTweet, secondTweet] = page.items;
+
+    if (!firstTweet || !secondTweet) {
+      throw new Error("Fixture drifted unexpectedly.");
+    }
+
+    expect(page.items.map((tweet) => tweet.id)).toEqual([
+      "bookmark-tweet-1",
+      "bookmark-tweet-2",
+    ]);
+    expect(firstTweet).toMatchObject({
+      id: "bookmark-tweet-1",
+      isQuoted: true,
+      quotedTweetId: "deleted-quoted-tweet",
+    });
+    expect(secondTweet).toMatchObject({
+      id: "bookmark-tweet-2",
+      isRetweet: true,
+      retweetedTweetId: "deleted-retweeted-tweet",
+    });
+    expect(firstTweet.quotedTweet).toBeUndefined();
+    expect(secondTweet.retweetedTweet).toBeUndefined();
+  });
+
   it("parses a bookmark mutation response without error", () => {
     expect(() =>
       parseBookmarkMutationResponse(bookmarkMutationSuccessFixture),
