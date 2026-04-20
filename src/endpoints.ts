@@ -467,7 +467,11 @@ export const endpointRegistry = {
       endpointId: "GuestActivate",
       family: "activation",
       authRequirement: "guest",
-      bearerToken: "default",
+      // x.com now binds the returned guest_token to the bearer that requested
+      // activation; every downstream guest endpoint uses the secondary bearer,
+      // so activation has to as well or UserByScreenName et al. return 403
+      // "Bad guest token" (code 239).
+      bearerToken: "secondary",
       rateLimitBucket: "guestActivation",
       method: "POST",
       url,
