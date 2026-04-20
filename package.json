@@ -3,23 +3,27 @@
   "version": "0.1.0",
   "description": "Effect-native Twitter/X scraper with session pooling, TLS fingerprinting, and endpoint auto-discovery",
   "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      }
-    }
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    "src",
-    "index.ts",
-    "LICENSE"
+    "LICENSE",
+    "README.md"
   ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "tag": "next"
+  },
   "scripts": {
     "build": "bun run build:js && bun run build:types",
     "build:js": "bun build index.ts --outdir dist --target node --format esm --external effect --external cycletls --external linkedom --external x-client-transaction-id",
@@ -33,7 +37,7 @@
     "test:live": "RUN_LIVE_TWITTER_SMOKE=1 RUN_LIVE_TWITTER_AUTH_SMOKE=1 vitest run tests/live-smoke.test.ts"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-beta.43"
+    "effect": ">=4.0.0-beta.43 <5.0.0"
   },
   "dependencies": {
     "cycletls": "^2.0.5",
@@ -56,11 +60,16 @@
     "effect-ts",
     "api",
     "tweets",
-    "timeline"
+    "timeline",
+    "bun"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mepuka/better-twitter-scraper"
-  }
+    "url": "git+https://github.com/mepuka/better-twitter-scraper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mepuka/better-twitter-scraper/issues"
+  },
+  "homepage": "https://github.com/mepuka/better-twitter-scraper#readme"
 }
